@@ -24,13 +24,6 @@ RUN mkdir -p /app/config/scenarios && \
     chmod 755 /app/data && \
     chmod 755 /app/logs
 
-# Create logs directory
-# Railway volume should be mounted at /app/logs for persistent storage
-RUN mkdir -p /app/logs && \
-    chmod 755 /app/logs && \
-    chmod 755 /app/config && \
-    chmod 755 /app/data
-
 # Expose port
 EXPOSE 3001
 
