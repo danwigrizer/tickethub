@@ -23,7 +23,8 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // Request logging setup
-const LOGS_DIR = join(__dirname, '../logs');
+// In Docker, server.js is at /app/server.js, so use /app/logs (not ../logs)
+const LOGS_DIR = join(__dirname, 'logs');
 const LOG_FILE = join(LOGS_DIR, 'requests.jsonl');
 const MAX_LOG_ENTRIES = parseInt(process.env.MAX_LOG_ENTRIES || '1000', 10);
 
@@ -235,7 +236,8 @@ app.use((req, res, next) => {
 loadRecentLogs();
 
 // Configuration management
-const CONFIG_PATH = join(__dirname, '../config/active.json');
+// In Docker, server.js is at /app/server.js, so use /app/config (not ../config)
+const CONFIG_PATH = join(__dirname, 'config/active.json');
 const DEFAULT_CONFIG = {
   ui: {
     priceFormat: 'currency_symbol', // 'currency_symbol', 'currency_code', 'number_only'
@@ -348,7 +350,7 @@ function getStadiumMapData(venueName) {
 
 // Helper function to load venue section data from data/venues/
 function loadVenueData(venueName) {
-  const VENUES_DIR = join(__dirname, '../data/venues');
+  const VENUES_DIR = join(__dirname, 'data/venues');
   
   if (!existsSync(VENUES_DIR)) {
     return null;
@@ -1229,7 +1231,7 @@ app.post('/api/config', (req, res) => {
 
 // Get available scenarios
 app.get('/api/scenarios', (req, res) => {
-  const SCENARIOS_DIR = join(__dirname, '../config/scenarios');
+  const SCENARIOS_DIR = join(__dirname, 'config/scenarios');
   try {
     const files = readdirSync(SCENARIOS_DIR).filter(f => f.endsWith('.json'));
     const scenarios = files.map(file => {
@@ -1246,7 +1248,7 @@ app.get('/api/scenarios', (req, res) => {
 // Load a scenario by name
 app.post('/api/scenarios/load', (req, res) => {
   const { name } = req.body;
-  const SCENARIOS_DIR = join(__dirname, '../config/scenarios');
+  const SCENARIOS_DIR = join(__dirname, 'config/scenarios');
   try {
     const files = readdirSync(SCENARIOS_DIR).filter(f => f.endsWith('.json'));
     for (const file of files) {
