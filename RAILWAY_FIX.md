@@ -30,15 +30,20 @@ If Railway requires a specific root directory:
 
 ## Railway Volumes (For Persistent Storage)
 
-If you want persistent logs and config:
+**See `RAILWAY_VOLUMES.md` for detailed instructions.**
+
+Quick setup:
 
 1. Go to your **Backend Service** in Railway
 2. Click **Volumes** tab
 3. Add volumes:
-   - **Path**: `/app/logs` → **Name**: `logs`
-   - **Path**: `/app/config` → **Name**: `config` (optional, config can be in image)
+   - **Mount Path**: `/app/logs` → **Name**: `logs` → **Size**: 1GB
+   - **Mount Path**: `/app/config` → **Name**: `config` → **Size**: 100MB
+   - (Optional) **Mount Path**: `/app/data` → **Name**: `data` → **Size**: 50MB
 
-The `data/venues/` directory is included in the image, so no volume needed.
+4. Redeploy the service after adding volumes
+
+The Dockerfile is configured to work with Railway volumes. Volumes will take precedence over files in the image.
 
 ## Quick Fix Steps
 

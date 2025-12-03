@@ -15,11 +15,17 @@ RUN npm ci --only=production
 COPY backend/server.js ./
 
 # Copy config and data directories (needed for scenarios and venue data)
+# These will be used as defaults if Railway volumes are not mounted
+# If volumes are mounted at /app/config and /app/data, they take precedence
 COPY config /app/config
 COPY data /app/data
 
-# Create logs directory (will use Railway volume if configured)
-RUN mkdir -p /app/logs
+# Create logs directory
+# Railway volume should be mounted at /app/logs for persistent storage
+RUN mkdir -p /app/logs && \
+    chmod 755 /app/logs && \
+    chmod 755 /app/config && \
+    chmod 755 /app/data
 
 # Expose port
 EXPOSE 3001
