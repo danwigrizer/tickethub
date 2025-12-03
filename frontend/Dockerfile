@@ -29,7 +29,10 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Copy necessary files
-COPY --from=builder /app/public ./public
+# Create public directory (Next.js public folder is optional)
+# Note: With standalone output, public assets are included in .next/standalone
+# We create an empty public directory for compatibility
+RUN mkdir -p ./public
 
 # Set the correct permission for prerender cache
 RUN mkdir .next
