@@ -1595,6 +1595,24 @@ app.delete('/api/logs', (req, res) => {
   res.json({ success: true, message: 'Logs cleared' });
 });
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Ticket Marketplace API',
+    version: '1.0.0',
+    status: 'running',
+    environment: NODE_ENV,
+    endpoints: {
+      health: '/health',
+      config: '/api/config',
+      events: '/api/events',
+      scenarios: '/api/scenarios',
+      logs: '/api/logs'
+    },
+    documentation: 'See /health for service status'
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ 
