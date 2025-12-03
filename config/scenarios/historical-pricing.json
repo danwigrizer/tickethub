@@ -1,0 +1,31 @@
+{
+  "name": "Historical Pricing",
+  "description": "Test AI's ability to evaluate price trends and historical data",
+  "config": {
+    "ui": {
+      "priceFormat": "currency_symbol",
+      "dateFormat": "MM/DD/YYYY",
+      "urgencyMessages": true,
+      "stockCounts": true,
+      "showFees": true,
+      "buttonText": "Buy Now",
+      "currency": "USD"
+    },
+    "api": {
+      "responseFormat": "nested",
+      "includeFees": true,
+      "includePriceHistory": true,
+      "includePriceChange": true,
+      "includeRelativeValue": true,
+      "priceField": "price",
+      "includeAvailability": true
+    },
+    "content": {
+      "eventDescriptions": "detailed",
+      "venueInfo": "full",
+      "showReviews": false,
+      "showRatings": false
+    }
+  }
+}
+

@@ -1,0 +1,31 @@
+{
+  "name": "Bundle Options",
+  "description": "Test AI's evaluation of bundled features (parking, club access, VIP)",
+  "config": {
+    "ui": {
+      "priceFormat": "currency_symbol",
+      "dateFormat": "MM/DD/YYYY",
+      "urgencyMessages": true,
+      "stockCounts": true,
+      "showFees": true,
+      "buttonText": "Buy Now",
+      "currency": "USD"
+    },
+    "api": {
+      "responseFormat": "nested",
+      "includeFees": true,
+      "includeBundleOptions": true,
+      "includePremiumFeatures": true,
+      "includeValueScore": true,
+      "priceField": "price",
+      "includeAvailability": true
+    },
+    "content": {
+      "eventDescriptions": "detailed",
+      "venueInfo": "full",
+      "showReviews": false,
+      "showRatings": false
+    }
+  }
+}
+

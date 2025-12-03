@@ -1,0 +1,28 @@
+{
+  "name": "European Format",
+  "description": "European date format and currency",
+  "config": {
+    "ui": {
+      "priceFormat": "currency_code",
+      "dateFormat": "DD/MM/YYYY",
+      "urgencyMessages": true,
+      "stockCounts": true,
+      "showFees": true,
+      "buttonText": "Buy Tickets",
+      "currency": "EUR"
+    },
+    "api": {
+      "responseFormat": "nested",
+      "includeFees": true,
+      "priceField": "price",
+      "includeAvailability": true
+    },
+    "content": {
+      "eventDescriptions": "detailed",
+      "venueInfo": "full",
+      "showReviews": false,
+      "showRatings": false
+    }
+  }
+}
+

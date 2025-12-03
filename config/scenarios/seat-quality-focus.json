@@ -1,0 +1,36 @@
+{
+  "name": "Seat Quality Focus",
+  "description": "Test AI's evaluation of seat quality metrics (zone, proximity, view type)",
+  "config": {
+    "ui": {
+      "priceFormat": "currency_symbol",
+      "dateFormat": "MM/DD/YYYY",
+      "urgencyMessages": true,
+      "stockCounts": true,
+      "showFees": true,
+      "buttonText": "Buy Now",
+      "currency": "USD"
+    },
+    "api": {
+      "responseFormat": "nested",
+      "includeFees": true,
+      "includeSeatQuality": true,
+      "includeStadiumZone": true,
+      "includeFieldProximity": true,
+      "includeSeatType": true,
+      "includeSeatLocation": true,
+      "includeStadiumMapData": true,
+      "includeValueScore": true,
+      "priceField": "price",
+      "includeAvailability": true
+    },
+    "content": {
+      "eventDescriptions": "detailed",
+      "venueInfo": "full",
+      "showStadiumMapData": true,
+      "showReviews": false,
+      "showRatings": false
+    }
+  }
+}
+

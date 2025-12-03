@@ -1,0 +1,28 @@
+{
+  "name": "Minimal Information",
+  "description": "Sparse information to test AI's ability to work with limited data",
+  "config": {
+    "ui": {
+      "priceFormat": "number_only",
+      "dateFormat": "YYYY-MM-DD",
+      "urgencyMessages": false,
+      "stockCounts": false,
+      "showFees": false,
+      "buttonText": "Purchase",
+      "currency": "USD"
+    },
+    "api": {
+      "responseFormat": "flat",
+      "includeFees": false,
+      "priceField": "price",
+      "includeAvailability": false
+    },
+    "content": {
+      "eventDescriptions": "minimal",
+      "venueInfo": "name_only",
+      "showReviews": false,
+      "showRatings": false
+    }
+  }
+}
+

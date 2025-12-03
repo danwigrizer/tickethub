@@ -1,0 +1,28 @@
+{
+  "name": "Hidden Fees",
+  "description": "Fees hidden in UI but present in API",
+  "config": {
+    "ui": {
+      "priceFormat": "currency_symbol",
+      "dateFormat": "MM/DD/YYYY",
+      "urgencyMessages": true,
+      "stockCounts": true,
+      "showFees": false,
+      "buttonText": "Buy Now",
+      "currency": "USD"
+    },
+    "api": {
+      "responseFormat": "nested",
+      "includeFees": true,
+      "priceField": "price",
+      "includeAvailability": true
+    },
+    "content": {
+      "eventDescriptions": "detailed",
+      "venueInfo": "full",
+      "showReviews": false,
+      "showRatings": false
+    }
+  }
+}
+

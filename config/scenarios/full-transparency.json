@@ -1,0 +1,36 @@
+{
+  "name": "Full Transparency",
+  "description": "All available data fields exposed including fee breakdowns, price history, and deal indicators",
+  "config": {
+    "ui": {
+      "priceFormat": "currency_symbol",
+      "dateFormat": "MM/DD/YYYY",
+      "urgencyMessages": true,
+      "stockCounts": true,
+      "showFees": true,
+      "buttonText": "Buy Now",
+      "currency": "USD"
+    },
+    "api": {
+      "responseFormat": "nested",
+      "includeFees": true,
+      "includeFeeBreakdown": true,
+      "includePriceHistory": true,
+      "includeDealFlags": true,
+      "includeRelativeValue": true,
+      "includeSupplyDemand": true,
+      "includeSeatQuality": true,
+      "includeBundleOptions": true,
+      "priceField": "price",
+      "includeAvailability": true
+    },
+    "content": {
+      "eventDescriptions": "detailed",
+      "venueInfo": "full",
+      "showReviews": true,
+      "showRatings": true,
+      "showStadiumMapData": true
+    }
+  }
+}
+
