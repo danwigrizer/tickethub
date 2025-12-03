@@ -11,20 +11,18 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci --only=production
 
-# Copy application code
+# Copy application code and entrypoint script
 COPY server.js ./
+COPY entrypoint.sh ./
 
 # Create directory structure
-# Railway allows only ONE volume per service, so we'll mount it at /app/storage
-# and create symlinks to the expected paths
+# Railway allows only ONE volume per service, so we mount it at /app/storage
+# The entrypoint script will create symlinks to the expected paths
 RUN mkdir -p /app/storage/config/scenarios && \
     mkdir -p /app/storage/data/venues && \
     mkdir -p /app/storage/logs && \
-    mkdir -p /app/config /app/data /app/logs && \
-    chmod 755 /app/storage && \
-    chmod 755 /app/config && \
-    chmod 755 /app/data && \
-    chmod 755 /app/logs
+    chmod +x entrypoint.sh && \
+    chmod 755 -R /app/storage
 
 # Expose port
 EXPOSE 3001
