@@ -14,12 +14,16 @@ RUN npm ci --only=production
 # Copy application code
 COPY backend/server.js ./
 
-# Copy config and data directories (needed for scenarios and venue data)
-# These will be used as defaults if Railway volumes are not mounted
-# If volumes are mounted at /app/config and /app/data, they take precedence
-# Note: Build context must be project root for these to work
+# Copy config directory (needed for scenarios)
+# This will be used as default if Railway volumes are not mounted
+# If volumes are mounted at /app/config, they take precedence
 COPY config /app/config
-COPY data /app/data
+
+# Create data directory structure
+# Data directory is optional - app works without it (uses default venue data)
+# If data exists in build context, copy it; otherwise create empty structure
+# Railway volumes can mount /app/data if needed
+RUN mkdir -p /app/data/venues
 
 # Create logs directory
 # Railway volume should be mounted at /app/logs for persistent storage
