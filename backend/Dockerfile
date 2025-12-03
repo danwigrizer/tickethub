@@ -1,29 +1,28 @@
 # Backend Dockerfile
-# Note: Build context should be the project root, not ./backend
-# This allows copying config and data directories
+# Note: Build context should be ./backend directory
+# Config and data directories are provided via Railway volumes
 FROM node:18-alpine
 
 WORKDIR /app
 
 # Copy package files
-COPY backend/package*.json ./
+COPY package*.json ./
 
 # Install dependencies
 RUN npm ci --only=production
 
 # Copy application code
-COPY backend/server.js ./
+COPY server.js ./
 
-# Copy config directory (needed for scenarios)
-# This will be used as default if Railway volumes are not mounted
-# If volumes are mounted at /app/config, they take precedence
-COPY config /app/config
-
-# Create data directory structure
-# Data directory is optional - app works without it (uses default venue data)
-# If data exists in build context, copy it; otherwise create empty structure
-# Railway volumes can mount /app/data if needed
-RUN mkdir -p /app/data/venues
+# Create directory structure for config, data, and logs
+# These directories will be populated by Railway volumes
+# The app handles missing directories gracefully
+RUN mkdir -p /app/config/scenarios && \
+    mkdir -p /app/data/venues && \
+    mkdir -p /app/logs && \
+    chmod 755 /app/config && \
+    chmod 755 /app/data && \
+    chmod 755 /app/logs
 
 # Create logs directory
 # Railway volume should be mounted at /app/logs for persistent storage
