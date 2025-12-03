@@ -14,12 +14,14 @@ RUN npm ci --only=production
 # Copy application code
 COPY server.js ./
 
-# Create directory structure for config, data, and logs
-# These directories will be populated by Railway volumes
-# The app handles missing directories gracefully
-RUN mkdir -p /app/config/scenarios && \
-    mkdir -p /app/data/venues && \
-    mkdir -p /app/logs && \
+# Create directory structure
+# Railway allows only ONE volume per service, so we'll mount it at /app/storage
+# and create symlinks to the expected paths
+RUN mkdir -p /app/storage/config/scenarios && \
+    mkdir -p /app/storage/data/venues && \
+    mkdir -p /app/storage/logs && \
+    mkdir -p /app/config /app/data /app/logs && \
+    chmod 755 /app/storage && \
     chmod 755 /app/config && \
     chmod 755 /app/data && \
     chmod 755 /app/logs

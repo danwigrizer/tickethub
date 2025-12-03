@@ -1,65 +1,58 @@
 # Railway Volume Setup - Complete Guide
 
-## Important: Config and Data via Volumes
+## Important: Single Volume Setup
 
-The Dockerfile now expects Railway volumes to provide `config/` and `data/` directories. The build context is `backend/`, so these directories aren't copied during build.
+**Railway allows only ONE volume per service**, so we use a single volume mounted at `/app/storage` with symlinks to the expected paths.
 
-## Required Railway Volumes
+## Required Railway Volume
 
-You **must** set up these volumes in Railway for the app to work:
+You **must** set up ONE volume in Railway:
 
-### 1. Config Volume (Required)
+### Storage Volume (Required)
 
-**Mount Path**: `/app/config`
-**Size**: 100 MB
+**Mount Path**: `/app/storage`
+**Size**: 2 GB (or adjust based on your needs)
 
-**Contents needed**:
-- `active.json` - Will be created automatically by the app
-- `scenarios/` directory with all scenario JSON files
+**Structure**:
+```
+/app/storage/
+├── config/
+│   ├── active.json (created automatically)
+│   └── scenarios/ (copy your scenario files here)
+├── data/
+│   └── venues/ (copy your venue files here)
+└── logs/ (created automatically)
+```
 
-**How to populate**:
-1. Create the volume in Railway
-2. Use Railway's file browser or SSH to copy files:
-   - Copy all files from `config/scenarios/` to `/app/config/scenarios/`
-   - The app will create `active.json` on first run
-
-### 2. Data Volume (Optional but Recommended)
-
-**Mount Path**: `/app/data`
-**Size**: 50 MB
-
-**Contents needed**:
-- `venues/` directory with all venue JSON files
-
-**How to populate**:
-1. Create the volume in Railway
-2. Copy all files from `data/venues/` to `/app/data/venues/`
-
-### 3. Logs Volume (Required for Production)
-
-**Mount Path**: `/app/logs`
-**Size**: 1 GB
-
-**Contents**: Created automatically by the app
+**How it works**:
+- The entrypoint script creates symlinks:
+  - `/app/config` → `/app/storage/config`
+  - `/app/data` → `/app/storage/data`
+  - `/app/logs` → `/app/storage/logs`
+- Your app code uses `/app/config`, `/app/data`, `/app/logs` as normal
+- All data is stored in the single `/app/storage` volume
 
 ## Quick Setup Steps
 
-1. **Create Volumes in Railway**:
+1. **Create Volume in Railway**:
    - Go to Backend Service → Volumes tab
-   - Add all three volumes with the mount paths above
+   - Click "+ New Volume"
+   - **Mount Path**: `/app/storage`
+   - **Name**: `storage` (or any name)
+   - **Size**: 2 GB
+   - Click "Add"
 
-2. **Populate Config Volume**:
+2. **Populate the Volume**:
+   After deployment, use Railway's file browser or SSH to copy files:
    ```bash
-   # Via Railway CLI or file browser
-   # Copy config/scenarios/*.json to /app/config/scenarios/
+   # Copy scenario files
+   # Copy config/scenarios/*.json to /app/storage/config/scenarios/
+   
+   # Copy venue files (optional)
+   # Copy data/venues/*.json to /app/storage/data/venues/
    ```
 
-3. **Populate Data Volume** (optional):
-   ```bash
-   # Copy data/venues/*.json to /app/data/venues/
-   ```
-
-4. **Redeploy** the service
+3. **Redeploy** the service (the entrypoint script will create symlinks automatically)
 
 ## Alternative: Include Files in Image
 
