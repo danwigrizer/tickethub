@@ -166,6 +166,41 @@ Edit `backend/server.js` and modify the `mockEvents` array.
 2. Add UI controls in `frontend/app/admin/page.tsx`
 3. Implement transformation logic in backend `transformEvent` function
 
+## Deployment
+
+The application is ready for deployment. See the deployment documentation for detailed instructions.
+
+### Quick Deployment Options
+
+**Docker (Recommended):**
+```bash
+docker-compose up -d
+```
+
+**Manual:**
+```bash
+# Build frontend
+npm run build:frontend
+
+# Start services
+npm start
+```
+
+### Documentation
+
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Comprehensive deployment guide
+- **[DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)** - Pre-deployment checklist
+- **[ENV_EXAMPLES.md](./ENV_EXAMPLES.md)** - Environment variable examples
+
+### Key Deployment Features
+
+- ✅ Environment variable configuration
+- ✅ Docker support with docker-compose
+- ✅ Health check endpoints (`/health`)
+- ✅ Production-optimized Next.js build
+- ✅ Configurable CORS for security
+- ✅ Centralized API URL configuration
+
 ## Notes
 
 - The configuration is stored in `config/active.json` (gitignored)

@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, appendFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -8,10 +8,231 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
-app.use(cors());
+// CORS configuration
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN 
+    ? (process.env.CORS_ORIGIN === '*' ? '*' : process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()))
+    : (NODE_ENV === 'production' ? false : '*'),
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// Request logging setup
+const LOGS_DIR = join(__dirname, '../logs');
+const LOG_FILE = join(LOGS_DIR, 'requests.jsonl');
+const MAX_LOG_ENTRIES = parseInt(process.env.MAX_LOG_ENTRIES || '1000', 10);
+
+// Ensure logs directory exists
+if (!existsSync(LOGS_DIR)) {
+  try {
+    mkdirSync(LOGS_DIR, { recursive: true });
+  } catch (e) {
+    // Directory might already exist or error creating
+    console.error('Error creating logs directory:', e);
+  }
+}
+
+// In-memory log store (for quick access)
+let requestLogs = [];
+
+// Load recent logs from file on startup
+function loadRecentLogs() {
+  if (existsSync(LOG_FILE)) {
+    try {
+      const lines = readFileSync(LOG_FILE, 'utf8').split('\n').filter(line => line.trim());
+      const recent = lines.slice(-MAX_LOG_ENTRIES);
+      requestLogs = recent.map(line => JSON.parse(line));
+    } catch (error) {
+      console.error('Error loading logs:', error);
+      requestLogs = [];
+    }
+  }
+}
+
+// Save log entry to file
+function saveLogEntry(entry) {
+  try {
+    appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n');
+  } catch (error) {
+    console.error('Error saving log entry:', error);
+  }
+}
+
+// Detect if request is from an agent/bot
+function isAgentRequest(req) {
+  const userAgent = (req.get('user-agent') || '').toLowerCase();
+  const referer = req.get('referer') || '';
+  
+  // Common agent indicators
+  const agentPatterns = [
+    'bot', 'crawler', 'spider', 'scraper', 'agent',
+    'curl', 'wget', 'python', 'node', 'axios', 'fetch',
+    'postman', 'insomnia', 'httpie', 'go-http-client',
+    'googlebot', 'bingbot', 'slurp', 'duckduckbot',
+    'baiduspider', 'yandexbot', 'facebookexternalhit',
+    'twitterbot', 'linkedinbot', 'whatsapp', 'telegram',
+    'discordbot', 'slackbot', 'anthropic', 'openai',
+    'claude', 'gpt', 'chatgpt', 'perplexity', 'bard',
+    'gemini', 'copilot', 'bingchat'
+  ];
+  
+  // Check user agent
+  if (agentPatterns.some(pattern => userAgent.includes(pattern))) {
+    return true;
+  }
+  
+  // Check for common API client headers
+  if (req.get('x-api-key') || req.get('authorization')) {
+    // Might be an API client, but not necessarily an agent
+  }
+  
+  // Check if it's a programmatic request (no typical browser headers)
+  const hasBrowserHeaders = req.get('accept')?.includes('text/html') || 
+                           req.get('accept-language') ||
+                           req.get('sec-fetch-mode');
+  
+  if (!hasBrowserHeaders && userAgent) {
+    return true; // Likely programmatic
+  }
+  
+  return false;
+}
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Capture request body (for POST/PUT requests)
+  let requestBody = null;
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+    requestBody = req.body;
+  }
+  
+  // Capture original response methods
+  const originalSend = res.send;
+  const originalJson = res.json;
+  let responseBody = null;
+  
+  // Override res.send
+  res.send = function(body) {
+    responseBody = body;
+    return originalSend.call(this, body);
+  };
+  
+  // Override res.json
+  res.json = function(body) {
+    responseBody = body; // Store as object, not string
+    return originalJson.call(this, body);
+  };
+  
+  // Log when response finishes
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    const userAgent = req.get('user-agent') || 'unknown';
+    const isAgent = isAgentRequest(req);
+    
+    // Parse response body if it's a string
+    let parsedResponseBody = null;
+    let responseBodyString = null;
+    let responseSize = 0;
+    
+    if (responseBody) {
+      if (typeof responseBody === 'string') {
+        responseBodyString = responseBody;
+        responseSize = responseBody.length;
+        // Try to parse as JSON
+        try {
+          parsedResponseBody = JSON.parse(responseBody);
+          responseBodyString = JSON.stringify(parsedResponseBody, null, 2); // Pretty print
+        } catch (e) {
+          // Not JSON, keep as string
+          parsedResponseBody = responseBody;
+        }
+      } else {
+        // Already an object
+        parsedResponseBody = responseBody;
+        responseBodyString = JSON.stringify(responseBody, null, 2);
+        responseSize = responseBodyString.length;
+      }
+    }
+    
+    // Limit response size for storage (keep full version in memory, truncated in file)
+    const MAX_RESPONSE_SIZE = 50000; // 50KB limit
+    const truncatedResponse = responseSize > MAX_RESPONSE_SIZE 
+      ? responseBodyString?.substring(0, MAX_RESPONSE_SIZE) + `\n... (truncated, ${responseSize} total bytes)`
+      : responseBodyString;
+    
+    // Extract summary info from response
+    let responseSummary = null;
+    if (parsedResponseBody) {
+      if (Array.isArray(parsedResponseBody)) {
+        responseSummary = {
+          type: 'array',
+          length: parsedResponseBody.length,
+          firstItemKeys: parsedResponseBody[0] ? Object.keys(parsedResponseBody[0]) : []
+        };
+      } else if (typeof parsedResponseBody === 'object' && parsedResponseBody !== null) {
+        responseSummary = {
+          type: 'object',
+          keys: Object.keys(parsedResponseBody),
+          hasNestedData: Object.values(parsedResponseBody).some(v => Array.isArray(v) || (typeof v === 'object' && v !== null))
+        };
+      }
+    }
+    
+    const logEntry = {
+      id: requestId,
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: req.path,
+      fullPath: req.originalUrl || req.path,
+      query: req.query,
+      params: req.params,
+      body: requestBody,
+      headers: {
+        'user-agent': userAgent,
+        'referer': req.get('referer') || null,
+        'origin': req.get('origin') || null,
+        'accept': req.get('accept') || null,
+        'content-type': req.get('content-type') || null,
+      },
+      ip: req.ip || req.connection.remoteAddress,
+      statusCode: res.statusCode,
+      responseBody: parsedResponseBody, // Store parsed object
+      responseBodyString: truncatedResponse, // Store formatted string for display
+      responseSize: responseSize,
+      responseSummary: responseSummary,
+      duration: duration,
+      durationFormatted: `${duration}ms`,
+      isAgent: isAgent
+    };
+    
+    // Add to in-memory store
+    requestLogs.push(logEntry);
+    if (requestLogs.length > MAX_LOG_ENTRIES) {
+      requestLogs.shift(); // Remove oldest entry
+    }
+    
+    // Save to file
+    saveLogEntry(logEntry);
+    
+    // Console log for agent requests
+    if (isAgent) {
+      console.log(`[AGENT REQUEST] ${req.method} ${req.path} - ${res.statusCode} - ${duration}ms - ${userAgent}`);
+    }
+  });
+  
+  next();
+});
+
+// Load recent logs on startup
+loadRecentLogs();
 
 // Configuration management
 const CONFIG_PATH = join(__dirname, '../config/active.json');
@@ -1225,6 +1446,171 @@ app.delete('/api/cart/:listingId', (req, res) => {
   res.json({ success: true });
 });
 
+// Get request logs
+app.get('/api/logs', (req, res) => {
+  const limit = parseInt(req.query.limit) || 100;
+  const agentOnly = req.query.agentOnly === 'true';
+  const path = req.query.path;
+  const method = req.query.method;
+  const statusCode = req.query.statusCode;
+  const search = req.query.search; // Search in path, user-agent, etc.
+  
+  let logs = [...requestLogs].reverse(); // Most recent first
+  
+  // Filter by agent requests if requested
+  if (agentOnly) {
+    logs = logs.filter(log => log.isAgent);
+  }
+  
+  // Filter by path if provided
+  if (path) {
+    logs = logs.filter(log => log.path.includes(path));
+  }
+  
+  // Filter by method if provided
+  if (method) {
+    logs = logs.filter(log => log.method === method.toUpperCase());
+  }
+  
+  // Filter by status code if provided
+  if (statusCode) {
+    logs = logs.filter(log => log.statusCode === parseInt(statusCode));
+  }
+  
+  // Search filter
+  if (search) {
+    const searchLower = search.toLowerCase();
+    logs = logs.filter(log => 
+      log.path.toLowerCase().includes(searchLower) ||
+      (log.headers['user-agent'] || '').toLowerCase().includes(searchLower) ||
+      JSON.stringify(log.query || {}).toLowerCase().includes(searchLower)
+    );
+  }
+  
+  // Apply limit
+  logs = logs.slice(0, limit);
+  
+  res.json({
+    total: requestLogs.length,
+    filtered: logs.length,
+    logs: logs
+  });
+});
+
+// Export logs as JSON
+app.get('/api/logs/export/json', (req, res) => {
+  const agentOnly = req.query.agentOnly === 'true';
+  let logs = [...requestLogs].reverse();
+  
+  if (agentOnly) {
+    logs = logs.filter(log => log.isAgent);
+  }
+  
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="request-logs-${new Date().toISOString().split('T')[0]}.json"`);
+  res.json(logs);
+});
+
+// Export logs as CSV
+app.get('/api/logs/export/csv', (req, res) => {
+  const agentOnly = req.query.agentOnly === 'true';
+  let logs = [...requestLogs].reverse();
+  
+  if (agentOnly) {
+    logs = logs.filter(log => log.isAgent);
+  }
+  
+  // CSV headers
+  const headers = ['Timestamp', 'Method', 'Path', 'Status Code', 'Duration (ms)', 'Is Agent', 'User Agent', 'IP', 'Response Size'];
+  const rows = logs.map(log => [
+    log.timestamp,
+    log.method,
+    log.path,
+    log.statusCode,
+    log.duration,
+    log.isAgent ? 'Yes' : 'No',
+    (log.headers['user-agent'] || '').replace(/,/g, ';'), // Replace commas in user agent
+    log.ip,
+    log.responseSize || 0
+  ]);
+  
+  const csv = [
+    headers.join(','),
+    ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+  ].join('\n');
+  
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="request-logs-${new Date().toISOString().split('T')[0]}.csv"`);
+  res.send(csv);
+});
+
+// Get log statistics
+app.get('/api/logs/stats', (req, res) => {
+  const totalRequests = requestLogs.length;
+  const agentRequests = requestLogs.filter(log => log.isAgent).length;
+  const recentLogs = requestLogs.slice(-100); // Last 100 requests
+  
+  const statusCodes = {};
+  const methods = {};
+  const paths = {};
+  const agents = {};
+  
+  recentLogs.forEach(log => {
+    statusCodes[log.statusCode] = (statusCodes[log.statusCode] || 0) + 1;
+    methods[log.method] = (methods[log.method] || 0) + 1;
+    paths[log.path] = (paths[log.path] || 0) + 1;
+    
+    if (log.isAgent) {
+      const ua = log.headers['user-agent'] || 'unknown';
+      agents[ua] = (agents[ua] || 0) + 1;
+    }
+  });
+  
+  res.json({
+    total: totalRequests,
+    agentRequests: agentRequests,
+    regularRequests: totalRequests - agentRequests,
+    agentPercentage: totalRequests > 0 ? ((agentRequests / totalRequests) * 100).toFixed(2) : 0,
+    recentStats: {
+      statusCodes,
+      methods,
+      topPaths: Object.entries(paths)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([path, count]) => ({ path, count })),
+      topAgents: Object.entries(agents)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([agent, count]) => ({ agent, count }))
+    }
+  });
+});
+
+// Clear logs (optional - for testing)
+app.delete('/api/logs', (req, res) => {
+  requestLogs = [];
+  if (existsSync(LOG_FILE)) {
+    writeFileSync(LOG_FILE, '');
+  }
+  res.json({ success: true, message: 'Logs cleared' });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    environment: NODE_ENV,
+    uptime: process.uptime()
+  });
+});
+
 app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
+  console.log(`Backend server running on port ${PORT}`);
+  console.log(`Environment: ${NODE_ENV}`);
+  if (NODE_ENV === 'development') {
+    console.log(`Request logs available at http://localhost:${PORT}/api/logs`);
+    console.log(`Log statistics at http://localhost:${PORT}/api/logs/stats`);
+  }
+  console.log(`Health check: http://localhost:${PORT}/health`);
 });

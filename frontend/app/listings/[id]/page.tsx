@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-
-const API_URL = 'http://localhost:3001/api'
+import { API_URL } from '@/lib/api'
 
 interface Listing {
   id: number

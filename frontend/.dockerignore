@@ -1,11 +1,10 @@
-node_modules/
-.next/
+node_modules
+npm-debug.log
+.next
 .env
 .env.local
 .env.*.local
 *.log
 .DS_Store
-config/active.json
-logs/
 tsconfig.tsbuildinfo
 
