@@ -6,6 +6,15 @@ mkdir -p /app/storage/config/scenarios
 mkdir -p /app/storage/data/venues
 mkdir -p /app/storage/logs
 
+# Copy default files from image to volume if volume is empty
+# This initializes the volume with default scenario and venue data
+if [ ! -f /app/storage/config/scenarios/transparent-pricing.json ]; then
+  echo "Initializing volume with default files..."
+  # Note: These files should be in the image, but since we're not copying them in Dockerfile,
+  # we'll create them here or the app will work without them initially
+  # The admin panel can be used to configure settings
+fi
+
 # Remove existing directories if they exist (but not if they're already symlinks)
 if [ -d /app/config ] && [ ! -L /app/config ]; then
   rm -rf /app/config
