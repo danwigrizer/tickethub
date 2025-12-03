@@ -1,0 +1,15 @@
+# Nixpacks configuration to prevent auto-detection
+# Railway will use Docker instead when Dockerfile is present
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x"]
+
+[phases.install]
+cmds = ["echo 'Using Docker instead of Nixpacks'"]
+
+[phases.build]
+cmds = ["echo 'This project uses Docker - please configure Railway to use Dockerfile'"]
+
+[start]
+cmd = "echo 'Please use Docker deployment'"
+

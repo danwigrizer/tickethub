@@ -1,0 +1,15 @@
+# Backend service - use Dockerfile
+# This prevents Railway from auto-detecting Node.js build
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x"]
+
+[phases.install]
+cmds = ["npm ci --only=production"]
+
+[phases.build]
+cmds = ["echo 'Build handled by Dockerfile'"]
+
+[start]
+cmd = "node server.js"
+
