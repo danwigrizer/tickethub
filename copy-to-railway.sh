@@ -19,10 +19,16 @@ if ! railway whoami &> /dev/null; then
     exit 1
 fi
 
-echo "📁 Creating directories in Railway volume..."
+# Get service name from Railway status or use default
+SERVICE_NAME=$(railway status 2>/dev/null | grep "Service:" | awk '{print $2}') || SERVICE_NAME="tickethub"
+
+# Allow override via environment variable
+SERVICE_NAME=${RAILWAY_SERVICE:-$SERVICE_NAME}
+
+echo "📁 Creating directories in Railway volume (using service: $SERVICE_NAME)..."
 
 # Create directories
-railway run --service backend sh -c "mkdir -p /app/storage/config/scenarios && mkdir -p /app/storage/data/venues"
+railway run --service "$SERVICE_NAME" sh -c "mkdir -p /app/storage/config/scenarios && mkdir -p /app/storage/data/venues"
 
 echo "📋 Copying scenario files..."
 
@@ -33,7 +39,7 @@ for file in config/scenarios/*.json; do
     
     # Encode file to base64 and copy via Railway
     base64_content=$(base64 < "$file")
-    railway run --service backend sh -c "echo '$base64_content' | base64 -d > /app/storage/config/scenarios/$filename"
+    railway run --service "$SERVICE_NAME" sh -c "echo '$base64_content' | base64 -d > /app/storage/config/scenarios/$filename"
 done
 
 echo "🏟️  Copying venue data files..."
@@ -45,13 +51,13 @@ for file in data/venues/*.json; do
     
     # Encode file to base64 and copy via Railway
     base64_content=$(base64 < "$file")
-    railway run --service backend sh -c "echo '$base64_content' | base64 -d > /app/storage/data/venues/$filename"
+    railway run --service "$SERVICE_NAME" sh -c "echo '$base64_content' | base64 -d > /app/storage/data/venues/$filename"
 done
 
 echo "✅ Files copied successfully!"
 echo ""
 echo "Verifying files..."
-railway run --service backend sh -c "ls -la /app/storage/config/scenarios/ && echo '---' && ls -la /app/storage/data/venues/"
+railway run --service "$SERVICE_NAME" sh -c "ls -la /app/storage/config/scenarios/ && echo '---' && ls -la /app/storage/data/venues/"
 
 echo ""
 echo "🎉 Done! Your files are now in the Railway volume."
