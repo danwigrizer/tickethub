@@ -1,18 +1,24 @@
 # Backend Dockerfile
+# Note: Build context should be the project root, not ./backend
+# This allows copying config and data directories
 FROM node:18-alpine
 
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY backend/package*.json ./
 
 # Install dependencies
 RUN npm ci --only=production
 
 # Copy application code
-COPY server.js ./
+COPY backend/server.js ./
 
-# Create logs directory
+# Copy config and data directories (needed for scenarios and venue data)
+COPY config /app/config
+COPY data /app/data
+
+# Create logs directory (will use Railway volume if configured)
 RUN mkdir -p /app/logs
 
 # Expose port
