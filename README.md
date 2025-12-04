@@ -188,7 +188,8 @@ npm start
 
 ### Documentation
 
-- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Comprehensive deployment guide
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - General deployment guide
+- **[RAILWAY_DEPLOYMENT.md](./RAILWAY_DEPLOYMENT.md)** - Specific guide for deploying to Railway (recommended)
 - **[DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md)** - Pre-deployment checklist
 - **[ENV_EXAMPLES.md](./ENV_EXAMPLES.md)** - Environment variable examples
 
