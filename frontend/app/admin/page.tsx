@@ -112,11 +112,21 @@ export default function Admin() {
   const [listings, setListings] = useState<Listing[]>([])
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
   const [updatingImage, setUpdatingImage] = useState<number | null>(null)
+  const [activeExperiment, setActiveExperiment] = useState<{ id: string; name: string } | null>(null)
 
   useEffect(() => {
     fetchConfig()
     fetchScenarios()
+    fetchActiveExperiment()
   }, [])
+
+  const fetchActiveExperiment = async () => {
+    try {
+      const res = await fetch(`${API_URL}/experiments?status=running`)
+      const data = await res.json()
+      if (data.length > 0) setActiveExperiment({ id: data[0].id, name: data[0].name })
+    } catch {}
+  }
 
   useEffect(() => {
     if (selectedEventId) {
@@ -313,7 +323,23 @@ export default function Admin() {
           <Link href="/admin/sessions" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
             Sessions
           </Link>
+          <Link href="/admin/experiments" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
+            Experiments
+          </Link>
         </div>
+
+        {activeExperiment && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center justify-between">
+            <div>
+              <span className="font-medium text-yellow-800">Experiment &ldquo;{activeExperiment.name}&rdquo; is active</span>
+              <span className="text-yellow-700 text-sm ml-2">&mdash; config changes here won&apos;t affect experiment sessions</span>
+            </div>
+            <Link href={`/admin/experiments/${activeExperiment.id}`} className="text-sm text-yellow-800 underline hover:text-yellow-900">
+              View experiment
+            </Link>
+          </div>
+        )}
+
         <h1 className="text-3xl font-bold mb-8">Admin Control Panel</h1>
         <p className="text-gray-600 mb-8">
           Modify the website configuration to test how AI models parse different content structures.

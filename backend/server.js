@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import { readFileSync, writeFileSync, existsSync, readdirSync, appendFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import experimentsRouter, { initExperiments, resolveExperimentConfig, getActiveExperiment } from './experiments.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -344,7 +345,9 @@ app.use((req, res, next) => {
       responseSummary: responseSummary,
       duration: duration,
       durationFormatted: `${duration}ms`,
-      isAgent: isAgent
+      isAgent: isAgent,
+      experimentId: req.experimentId || null,
+      variantId: req.variantId || null
     };
 
     // Add to in-memory store
@@ -367,6 +370,11 @@ app.use((req, res, next) => {
       session.requestIds.push(requestId);
       // Update agent status if detected on any request
       if (isAgent) session.isAgent = true;
+      // Track experiment assignment on session
+      if (req.experimentId) {
+        session.experimentId = req.experimentId;
+        session.variantId = req.variantId;
+      }
       persistSessions();
     }
 
@@ -446,6 +454,16 @@ function loadConfig() {
 function saveConfig(config) {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
+
+// Initialize experiments module
+initExperiments({
+  sessions,
+  requestLogs,
+  loadConfig,
+  logsDir: LOGS_DIR,
+  configDir: join(__dirname, 'config')
+});
+app.use(experimentsRouter);
 
 // Helper function to get stadium map data for a venue
 function getStadiumMapData(venueName) {
@@ -1417,14 +1435,16 @@ app.post('/api/scenarios/load', (req, res) => {
 
 // Get all events
 app.get('/api/events', (req, res) => {
-  const config = loadConfig();
+  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  req.experimentId = experimentId; req.variantId = variantId;
   const transformed = mockEvents.map(event => transformEvent(event, config, mockListings));
   res.json(transformed);
 });
 
 // Get single event
 app.get('/api/events/:id', (req, res) => {
-  const config = loadConfig();
+  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  req.experimentId = experimentId; req.variantId = variantId;
   const event = mockEvents.find(e => e.id === parseInt(req.params.id));
   if (!event) {
     return res.status(404).json({ error: 'Event not found' });
@@ -1437,7 +1457,8 @@ app.get('/api/events/:id', (req, res) => {
 
 // Get listings for an event
 app.get('/api/events/:id/listings', (req, res) => {
-  const config = loadConfig();
+  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  req.experimentId = experimentId; req.variantId = variantId;
   const eventId = parseInt(req.params.id);
   let listings = mockListings.filter(l => l.eventId === eventId);
   
@@ -1480,7 +1501,8 @@ app.get('/api/events/:id/listings', (req, res) => {
 
 // Get single listing
 app.get('/api/listings/:id', (req, res) => {
-  const config = loadConfig();
+  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  req.experimentId = experimentId; req.variantId = variantId;
   const listing = mockListings.find(l => l.id === parseInt(req.params.id));
   if (!listing) {
     return res.status(404).json({ error: 'Listing not found' });
@@ -1530,7 +1552,8 @@ app.put('/api/listings/:id/notes', (req, res) => {
 
 // Search events
 app.get('/api/search', (req, res) => {
-  const config = loadConfig();
+  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  req.experimentId = experimentId; req.variantId = variantId;
   const query = req.query.q?.toLowerCase() || '';
   const filtered = mockEvents.filter(event => 
     event.title.toLowerCase().includes(query) ||
@@ -1541,15 +1564,22 @@ app.get('/api/search', (req, res) => {
   res.json(filtered.map(event => transformEvent(event, config)));
 });
 
-// Shopping cart operations
-let cart = {}; // { [listingId]: quantity }
+// Shopping cart operations (scoped per session)
+let carts = {}; // { [sessionId]: { [listingId]: quantity } }
+
+function getCart(sessionId) {
+  if (!carts[sessionId]) carts[sessionId] = {};
+  return carts[sessionId];
+}
 
 app.get('/api/cart', (req, res) => {
-  const config = loadConfig();
+  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  req.experimentId = experimentId; req.variantId = variantId;
+  const cart = getCart(req.sessionId);
   const cartItems = Object.entries(cart).map(([listingId, quantity]) => {
     const listing = mockListings.find(l => l.id === parseInt(listingId));
     if (!listing) return null;
-    
+
     const eventListings = mockListings.filter(l => l.eventId === listing.eventId);
     const event = mockEvents.find(e => e.id === listing.eventId);
     return {
@@ -1559,39 +1589,41 @@ app.get('/api/cart', (req, res) => {
       event: transformEvent(event, config, mockListings)
     };
   }).filter(item => item !== null);
-  
+
   res.json(cartItems);
 });
 
 app.post('/api/cart', (req, res) => {
   const { listingId, quantity } = req.body;
-  
+
   if (!listingId || !quantity) {
     return res.status(400).json({ error: 'listingId and quantity are required' });
   }
-  
+
   const listing = mockListings.find(l => l.id === listingId);
   if (!listing) {
     return res.status(404).json({ error: 'Listing not found' });
   }
-  
+
   if (quantity > listing.quantity) {
     return res.status(400).json({ error: 'Quantity exceeds available tickets' });
   }
-  
+
+  const cart = getCart(req.sessionId);
   if (!cart[listingId]) {
     cart[listingId] = 0;
   }
   cart[listingId] += quantity;
-  
+
   if (cart[listingId] > listing.quantity) {
     cart[listingId] = listing.quantity;
   }
-  
+
   res.json({ listingId, quantity: cart[listingId] });
 });
 
 app.delete('/api/cart/:listingId', (req, res) => {
+  const cart = getCart(req.sessionId);
   delete cart[req.params.listingId];
   res.json({ success: true });
 });
@@ -1852,7 +1884,8 @@ app.get('/', (req, res) => {
       events: '/api/events',
       scenarios: '/api/scenarios',
       logs: '/api/logs',
-      sessions: '/api/sessions'
+      sessions: '/api/sessions',
+      experiments: '/api/experiments'
     },
     documentation: 'See /health for service status'
   });

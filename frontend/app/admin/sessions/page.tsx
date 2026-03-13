@@ -15,6 +15,8 @@ interface SessionRecord {
   ip: string
   pagesVisited: string[]
   requestIds: string[]
+  experimentId?: string
+  variantId?: string
 }
 
 interface SessionStats {
@@ -197,6 +199,9 @@ export default function SessionsPage() {
           <span className="pb-2 font-semibold border-b-2 border-blue-600 text-blue-600">
             Sessions
           </span>
+          <Link href="/admin/experiments" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
+            Experiments
+          </Link>
         </div>
 
         <h1 className="text-3xl font-bold mb-2">Session Tracking</h1>
@@ -310,6 +315,11 @@ export default function SessionsPage() {
                         }`}>
                           {session.isAgent ? 'Agent' : 'Browser'}
                         </span>
+                        {session.experimentId && (
+                          <Link href={`/admin/experiments/${session.experimentId}`} className="text-xs px-2 py-0.5 rounded-full font-medium bg-purple-100 text-purple-700 hover:bg-purple-200">
+                            {session.variantId === 'control' ? 'Control' : session.variantId || 'Experiment'}
+                          </Link>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 text-sm text-gray-600 mb-2">
                         <span>{session.requestCount} requests</span>
