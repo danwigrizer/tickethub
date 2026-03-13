@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { readFileSync, writeFileSync, existsSync, readdirSync, appendFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -21,6 +22,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(cookieParser());
 
 // Request logging setup
 // In Docker, server.js is at /app/server.js, so use /app/logs (not ../logs)
@@ -64,6 +66,130 @@ function saveLogEntry(entry) {
   }
 }
 
+// ========== Session Tracking ==========
+const SESSIONS_FILE = join(LOGS_DIR, 'sessions.json');
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_SESSIONS = parseInt(process.env.MAX_SESSIONS || '500', 10);
+let sessions = new Map(); // sessionId -> session object
+
+function generateSessionId() {
+  return `sess_${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function loadSessions() {
+  if (existsSync(SESSIONS_FILE)) {
+    try {
+      const data = JSON.parse(readFileSync(SESSIONS_FILE, 'utf8'));
+      for (const session of data) {
+        sessions.set(session.id, session);
+      }
+      // Enforce max
+      if (sessions.size > MAX_SESSIONS) {
+        const sorted = [...sessions.values()].sort((a, b) => new Date(a.lastActivity) - new Date(b.lastActivity));
+        const toRemove = sorted.slice(0, sessions.size - MAX_SESSIONS);
+        for (const s of toRemove) sessions.delete(s.id);
+      }
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+    }
+  }
+}
+
+let persistSessionsTimer = null;
+function persistSessions() {
+  if (persistSessionsTimer) clearTimeout(persistSessionsTimer);
+  persistSessionsTimer = setTimeout(() => {
+    try {
+      writeFileSync(SESSIONS_FILE, JSON.stringify([...sessions.values()], null, 2));
+    } catch (error) {
+      console.error('Error persisting sessions:', error);
+    }
+  }, 2000);
+}
+
+function resolveSession(req, res) {
+  // Priority: explicit header > cookie > fingerprint
+  let sessionId = req.headers['x-session-id'] || req.cookies?.tickethub_session_id || null;
+
+  // Validate session exists and is not expired
+  if (sessionId && sessions.has(sessionId)) {
+    const session = sessions.get(sessionId);
+    const elapsed = Date.now() - new Date(session.lastActivity).getTime();
+    if (elapsed > SESSION_TIMEOUT_MS) {
+      sessionId = null; // expired
+    }
+  } else if (sessionId) {
+    sessionId = null; // unknown session
+  }
+
+  // Fallback: fingerprint from IP + user-agent
+  if (!sessionId) {
+    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const ua = req.get('user-agent') || 'unknown';
+    const fingerprint = `fp_${Buffer.from(ip + '||' + ua).toString('base64url').substr(0, 20)}`;
+
+    // Check if there's an active session with this fingerprint
+    for (const [id, s] of sessions) {
+      if (s.fingerprint === fingerprint) {
+        const elapsed = Date.now() - new Date(s.lastActivity).getTime();
+        if (elapsed <= SESSION_TIMEOUT_MS) {
+          sessionId = id;
+          break;
+        }
+      }
+    }
+
+    // Create new session if none found
+    if (!sessionId) {
+      sessionId = generateSessionId();
+      const isAgent = isAgentRequest(req);
+      sessions.set(sessionId, {
+        id: sessionId,
+        fingerprint,
+        startTime: new Date().toISOString(),
+        lastActivity: new Date().toISOString(),
+        requestCount: 0,
+        isAgent,
+        userAgent: req.get('user-agent') || 'unknown',
+        ip: req.ip || req.connection?.remoteAddress || 'unknown',
+        pagesVisited: [],
+        requestIds: []
+      });
+
+      // Enforce max sessions
+      if (sessions.size > MAX_SESSIONS) {
+        const oldest = [...sessions.values()].sort((a, b) => new Date(a.lastActivity) - new Date(b.lastActivity))[0];
+        if (oldest) sessions.delete(oldest.id);
+      }
+    }
+  }
+
+  // Set cookie and response header
+  res.cookie('tickethub_session_id', sessionId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: SESSION_TIMEOUT_MS
+  });
+  res.setHeader('X-Session-Id', sessionId);
+
+  return sessionId;
+}
+
+// Cleanup expired sessions every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [id, session] of sessions) {
+    if (now - new Date(session.lastActivity).getTime() > SESSION_TIMEOUT_MS) {
+      sessions.delete(id);
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    persistSessions();
+  }
+}, 5 * 60 * 1000);
+
 // Detect if request is from an agent/bot
 function isAgentRequest(req) {
   const userAgent = (req.get('user-agent') || '').toLowerCase();
@@ -103,6 +229,12 @@ function isAgentRequest(req) {
   
   return false;
 }
+
+// Session resolution middleware
+app.use((req, res, next) => {
+  req.sessionId = resolveSession(req, res);
+  next();
+});
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -189,6 +321,7 @@ app.use((req, res, next) => {
     
     const logEntry = {
       id: requestId,
+      sessionId: req.sessionId,
       timestamp: new Date().toISOString(),
       method: req.method,
       path: req.path,
@@ -213,16 +346,30 @@ app.use((req, res, next) => {
       durationFormatted: `${duration}ms`,
       isAgent: isAgent
     };
-    
+
     // Add to in-memory store
     requestLogs.push(logEntry);
     if (requestLogs.length > MAX_LOG_ENTRIES) {
       requestLogs.shift(); // Remove oldest entry
     }
-    
+
     // Save to file
     saveLogEntry(logEntry);
-    
+
+    // Update session
+    if (req.sessionId && sessions.has(req.sessionId)) {
+      const session = sessions.get(req.sessionId);
+      session.lastActivity = new Date().toISOString();
+      session.requestCount++;
+      if (!session.pagesVisited.length || session.pagesVisited[session.pagesVisited.length - 1] !== req.path) {
+        session.pagesVisited.push(req.path);
+      }
+      session.requestIds.push(requestId);
+      // Update agent status if detected on any request
+      if (isAgent) session.isAgent = true;
+      persistSessions();
+    }
+
     // Console log for agent requests
     if (isAgent) {
       console.log(`[AGENT REQUEST] ${req.method} ${req.path} - ${res.statusCode} - ${duration}ms - ${userAgent}`);
@@ -232,8 +379,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Load recent logs on startup
+// Load recent logs and sessions on startup
 loadRecentLogs();
+loadSessions();
 
 // Configuration management
 // In Docker, server.js is at /app/server.js, so use /app/config (not ../config)
@@ -1597,6 +1745,100 @@ app.delete('/api/logs', (req, res) => {
   res.json({ success: true, message: 'Logs cleared' });
 });
 
+// ========== Session API Routes ==========
+
+// Session stats (must be before /api/sessions/:id)
+app.get('/api/sessions/stats', (req, res) => {
+  const allSessions = [...sessions.values()];
+  const now = Date.now();
+  const activeSessions = allSessions.filter(s => now - new Date(s.lastActivity).getTime() <= SESSION_TIMEOUT_MS);
+  const agentSessions = allSessions.filter(s => s.isAgent);
+  const avgRequestCount = allSessions.length > 0
+    ? Math.round(allSessions.reduce((sum, s) => sum + s.requestCount, 0) / allSessions.length)
+    : 0;
+  const avgDurationMs = allSessions.length > 0
+    ? Math.round(allSessions.reduce((sum, s) => sum + (new Date(s.lastActivity) - new Date(s.startTime)), 0) / allSessions.length)
+    : 0;
+
+  // Top paths across all sessions
+  const pathCounts = {};
+  allSessions.forEach(s => s.pagesVisited.forEach(p => { pathCounts[p] = (pathCounts[p] || 0) + 1; }));
+  const topPaths = Object.entries(pathCounts)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 10)
+    .map(([path, count]) => ({ path, count }));
+
+  res.json({
+    total: allSessions.length,
+    agentSessions: agentSessions.length,
+    regularSessions: allSessions.length - agentSessions.length,
+    activeSessions: activeSessions.length,
+    avgRequestCount,
+    avgDurationMs,
+    topPaths
+  });
+});
+
+// List sessions
+app.get('/api/sessions', (req, res) => {
+  let result = [...sessions.values()];
+  const now = Date.now();
+
+  // Filters
+  if (req.query.agentOnly === 'true') {
+    result = result.filter(s => s.isAgent);
+  }
+  if (req.query.activeOnly === 'true') {
+    result = result.filter(s => now - new Date(s.lastActivity).getTime() <= SESSION_TIMEOUT_MS);
+  }
+  if (req.query.search) {
+    const q = req.query.search.toLowerCase();
+    result = result.filter(s =>
+      s.id.toLowerCase().includes(q) ||
+      s.userAgent.toLowerCase().includes(q) ||
+      s.ip.includes(q) ||
+      s.pagesVisited.some(p => p.toLowerCase().includes(q))
+    );
+  }
+
+  // Sort by most recent activity
+  result.sort((a, b) => new Date(b.lastActivity) - new Date(a.lastActivity));
+
+  // Pagination
+  const limit = parseInt(req.query.limit || '50', 10);
+  const offset = parseInt(req.query.offset || '0', 10);
+  const total = result.length;
+  result = result.slice(offset, offset + limit);
+
+  res.json({ total, sessions: result });
+});
+
+// Get single session with full request trail
+app.get('/api/sessions/:id', (req, res) => {
+  const session = sessions.get(req.params.id);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  // Look up the actual log entries for this session
+  const requestIdSet = new Set(session.requestIds);
+  let requests = requestLogs.filter(log => requestIdSet.has(log.id) || log.sessionId === session.id);
+
+  // Sort chronologically
+  requests.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+  res.json({ session, requests });
+});
+
+// Clear all sessions
+app.delete('/api/sessions', (req, res) => {
+  sessions.clear();
+  if (existsSync(SESSIONS_FILE)) {
+    writeFileSync(SESSIONS_FILE, '[]');
+  }
+  res.json({ success: true, message: 'Sessions cleared' });
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
@@ -1609,7 +1851,8 @@ app.get('/', (req, res) => {
       config: '/api/config',
       events: '/api/events',
       scenarios: '/api/scenarios',
-      logs: '/api/logs'
+      logs: '/api/logs',
+      sessions: '/api/sessions'
     },
     documentation: 'See /health for service status'
   });
@@ -1631,6 +1874,7 @@ app.listen(PORT, () => {
   if (NODE_ENV === 'development') {
     console.log(`Request logs available at http://localhost:${PORT}/api/logs`);
     console.log(`Log statistics at http://localhost:${PORT}/api/logs/stats`);
+    console.log(`Sessions at http://localhost:${PORT}/api/sessions`);
   }
   console.log(`Health check: http://localhost:${PORT}/health`);
 });

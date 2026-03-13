@@ -57,6 +57,7 @@ interface Listing {
 
 interface LogEntry {
   id: string
+  sessionId?: string
   timestamp: string
   method: string
   path: string
@@ -305,6 +306,14 @@ export default function Admin() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="flex gap-6 mb-8 border-b">
+          <span className="pb-2 font-semibold border-b-2 border-blue-600 text-blue-600">
+            Configuration
+          </span>
+          <Link href="/admin/sessions" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
+            Sessions
+          </Link>
+        </div>
         <h1 className="text-3xl font-bold mb-8">Admin Control Panel</h1>
         <p className="text-gray-600 mb-8">
           Modify the website configuration to test how AI models parse different content structures.
