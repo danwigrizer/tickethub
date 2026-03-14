@@ -67,25 +67,57 @@ export default function ListingOverridesPage() {
   }, [selectedEventId])
 
   const fetchEvents = async () => {
+    const url = `${API_URL}/events`
+    console.log('[ListingOverrides] Fetching events from:', url)
     try {
-      const res = await fetch(`${API_URL}/events`)
+      const res = await fetch(url)
+      console.log('[ListingOverrides] Events response:', res.status, res.statusText)
+      if (!res.ok) {
+        const text = await res.text()
+        console.error('[ListingOverrides] Events error body:', text)
+        setLoading(false)
+        return
+      }
       setEvents(await res.json())
       setLoading(false)
-    } catch { setLoading(false) }
+    } catch (error) {
+      console.error('[ListingOverrides] Events fetch error:', error)
+      setLoading(false)
+    }
   }
 
   const fetchListings = async (eventId: number) => {
+    const url = `${API_URL}/events/${eventId}/listings?sort=price_asc`
+    console.log('[ListingOverrides] Fetching listings from:', url)
     try {
-      const res = await fetch(`${API_URL}/events/${eventId}/listings?sort=price_asc`)
+      const res = await fetch(url)
+      console.log('[ListingOverrides] Listings response:', res.status, res.statusText)
+      if (!res.ok) {
+        const text = await res.text()
+        console.error('[ListingOverrides] Listings error body:', text)
+        return
+      }
       setListings(await res.json())
-    } catch {}
+    } catch (error) {
+      console.error('[ListingOverrides] Listings fetch error:', error)
+    }
   }
 
   const fetchOverrides = async () => {
+    const url = `${API_URL}/listing-overrides`
+    console.log('[ListingOverrides] Fetching overrides from:', url)
     try {
-      const res = await fetch(`${API_URL}/listing-overrides`)
+      const res = await fetch(url)
+      console.log('[ListingOverrides] Overrides response:', res.status, res.statusText)
+      if (!res.ok) {
+        const text = await res.text()
+        console.error('[ListingOverrides] Overrides error body:', text)
+        return
+      }
       setOverrides(await res.json())
-    } catch {}
+    } catch (error) {
+      console.error('[ListingOverrides] Overrides fetch error:', error)
+    }
   }
 
   const saveOverride = async (listingId: number) => {
@@ -94,18 +126,23 @@ export default function ListingOverridesPage() {
     for (const [key, value] of Object.entries(editFields)) {
       if (value !== '' && value !== undefined && value !== null) cleaned[key] = value
     }
+    console.log('[ListingOverrides] Save override for listing', listingId, '| fields:', JSON.stringify(cleaned))
     if (Object.keys(cleaned).length === 0) {
       setMessage('No override fields set — enter at least one value')
       setTimeout(() => setMessage(''), 3000)
       return
     }
 
+    const url = `${API_URL}/listing-overrides/${listingId}`
+    console.log('[ListingOverrides] PUT', url, '| body:', JSON.stringify(cleaned))
     try {
-      const res = await fetch(`${API_URL}/listing-overrides/${listingId}`, {
+      const res = await fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cleaned)
       })
+      const responseText = await res.text()
+      console.log('[ListingOverrides] PUT response:', res.status, res.statusText, '| body:', responseText)
       if (res.ok) {
         setMessage(`Overrides saved for listing ${listingId}`)
         setTimeout(() => setMessage(''), 3000)
@@ -113,24 +150,33 @@ export default function ListingOverridesPage() {
         setEditingId(null)
         setEditFields({})
       } else {
-        const err = await res.json().catch(() => ({ error: 'Unknown error' }))
-        setMessage(`Error: ${err.error || res.statusText}`)
-        setTimeout(() => setMessage(''), 5000)
+        let errMsg = `${res.status} ${res.statusText}`
+        try {
+          const errData = JSON.parse(responseText)
+          errMsg = errData.error || errMsg
+        } catch {}
+        setMessage(`Error saving listing ${listingId}: ${errMsg} (check console for details)`)
+        setTimeout(() => setMessage(''), 10000)
       }
     } catch (error) {
-      console.error('Error saving overrides:', error)
-      setMessage('Error saving overrides — check console')
-      setTimeout(() => setMessage(''), 5000)
+      console.error('[ListingOverrides] PUT fetch error:', error)
+      setMessage(`Network error saving listing ${listingId}: ${error instanceof Error ? error.message : String(error)}`)
+      setTimeout(() => setMessage(''), 10000)
     }
   }
 
   const deleteOverride = async (listingId: number) => {
+    const url = `${API_URL}/listing-overrides/${listingId}`
+    console.log('[ListingOverrides] DELETE', url)
     try {
-      await fetch(`${API_URL}/listing-overrides/${listingId}`, { method: 'DELETE' })
+      const res = await fetch(url, { method: 'DELETE' })
+      console.log('[ListingOverrides] DELETE response:', res.status, res.statusText)
       fetchOverrides()
       setMessage(`Overrides cleared for listing ${listingId}`)
       setTimeout(() => setMessage(''), 3000)
-    } catch {}
+    } catch (error) {
+      console.error('[ListingOverrides] DELETE error:', error)
+    }
   }
 
   const clearAll = async () => {
@@ -170,7 +216,7 @@ export default function ListingOverridesPage() {
         </div>
 
         {message && (
-          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded text-green-800 text-sm">{message}</div>
+          <div className={`mb-4 p-3 rounded text-sm ${message.toLowerCase().includes('error') || message.toLowerCase().includes('network') ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-green-50 border border-green-200 text-green-800'}`}>{message}</div>
         )}
 
         <div className="flex items-center justify-between mb-6">
