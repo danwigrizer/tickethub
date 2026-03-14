@@ -116,4 +116,8 @@ export function initListingOverrides({ logsDir, listings }) {
   loadOverrides();
 }
 
+export function setListingOverridesListings(listings) {
+  mockListings = listings;
+}
+
 export default router;

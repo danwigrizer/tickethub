@@ -92,9 +92,13 @@ export default function ListingOverridesPage() {
     // Filter out empty fields
     const cleaned: FieldOverrides = {}
     for (const [key, value] of Object.entries(editFields)) {
-      if (value !== '' && value !== undefined) cleaned[key] = value
+      if (value !== '' && value !== undefined && value !== null) cleaned[key] = value
     }
-    if (Object.keys(cleaned).length === 0) return
+    if (Object.keys(cleaned).length === 0) {
+      setMessage('No override fields set — enter at least one value')
+      setTimeout(() => setMessage(''), 3000)
+      return
+    }
 
     try {
       const res = await fetch(`${API_URL}/listing-overrides/${listingId}`, {
@@ -108,9 +112,15 @@ export default function ListingOverridesPage() {
         fetchOverrides()
         setEditingId(null)
         setEditFields({})
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }))
+        setMessage(`Error: ${err.error || res.statusText}`)
+        setTimeout(() => setMessage(''), 5000)
       }
-    } catch {
-      setMessage('Error saving overrides')
+    } catch (error) {
+      console.error('Error saving overrides:', error)
+      setMessage('Error saving overrides — check console')
+      setTimeout(() => setMessage(''), 5000)
     }
   }
 

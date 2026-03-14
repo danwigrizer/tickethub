@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, appendFileSync, m
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import experimentsRouter, { initExperiments, resolveExperimentConfig, getActiveExperiment } from './experiments.js';
-import listingOverridesRouter, { initListingOverrides, getGlobalListingOverrides, applyListingOverrides } from './listingOverrides.js';
+import listingOverridesRouter, { initListingOverrides, setListingOverridesListings, getGlobalListingOverrides, applyListingOverrides } from './listingOverrides.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -638,7 +638,9 @@ initExperiments({
 });
 app.use(experimentsRouter);
 
-initListingOverrides({ logsDir: LOGS_DIR, listings: mockListings });
+// listingOverrides init is deferred — mockListings isn't defined yet at this point
+// We init the file path now and set the listings reference later
+initListingOverrides({ logsDir: LOGS_DIR, listings: null });
 app.use(listingOverridesRouter);
 
 // Helper function to get stadium map data for a venue
@@ -1095,6 +1097,9 @@ const mockListings = [
   ...generateListingsForEvent(5, 150.00), // Phantom
   ...generateListingsForEvent(6, 110.00)  // Celtics vs Heat
 ];
+
+// Now that mockListings exists, pass the reference to listingOverrides module
+setListingOverridesListings(mockListings);
 
 // Format price based on configuration
 function formatPrice(price, config) {
