@@ -1533,6 +1533,42 @@ function transformListing(listing, config, allListingsForEvent = []) {
     delete transformed.sellerTransactionCount;
   }
 
+  // Trust signals — controls how much seller trust emphasis appears
+  switch (config.seller.trustSignals) {
+    case 'none':
+      delete transformed.sellerVerified;
+      delete transformed.sellerRating;
+      delete transformed.sellerTransactionCount;
+      break;
+    case 'minimal':
+      // Only show verified badge, no counts or rating
+      delete transformed.sellerTransactionCount;
+      delete transformed.sellerRating;
+      break;
+    case 'heavy':
+      // Add extra trust emphasis fields
+      if (transformed.sellerVerified) {
+        transformed.sellerTrustBadge = 'Verified Trusted Seller';
+      }
+      if (transformed.sellerTransactionCount > 100) {
+        transformed.sellerReputation = 'Top Seller — ' + transformed.sellerTransactionCount + '+ transactions';
+      } else if (transformed.sellerTransactionCount > 20) {
+        transformed.sellerReputation = 'Experienced Seller';
+      }
+      if (transformed.sellerRating >= 4.5) {
+        transformed.sellerRatingLabel = 'Excellent';
+      } else if (transformed.sellerRating >= 4.0) {
+        transformed.sellerRatingLabel = 'Very Good';
+      } else {
+        transformed.sellerRatingLabel = 'Good';
+      }
+      break;
+    case 'standard':
+    default:
+      // Default behavior — all seller fields pass through as-is
+      break;
+  }
+
   // Deal flags (conditionally)
   if (!config.scores.includeDealFlags) {
     delete transformed.dealFlags;
@@ -1655,6 +1691,11 @@ function transformListing(listing, config, allListingsForEvent = []) {
       if (transformed.sellerVerified !== undefined) flat.sellerVerified = transformed.sellerVerified;
       if (transformed.sellerTransactionCount !== undefined) flat.sellerTransactionCount = transformed.sellerTransactionCount;
     }
+
+    // Trust signal extras (heavy mode adds these fields)
+    if (transformed.sellerTrustBadge) flat.sellerTrustBadge = transformed.sellerTrustBadge;
+    if (transformed.sellerReputation) flat.sellerReputation = transformed.sellerReputation;
+    if (transformed.sellerRatingLabel) flat.sellerRatingLabel = transformed.sellerRatingLabel;
 
     if (config.scores.includeDealFlags && transformed.dealFlags) {
       flat.dealFlags = transformed.dealFlags;
