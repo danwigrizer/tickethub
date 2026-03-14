@@ -297,6 +297,7 @@ export default function ExperimentsPage() {
           <Link href="/admin" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">Configuration</Link>
           <Link href="/admin/sessions" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">Sessions</Link>
           <span className="pb-2 font-semibold border-b-2 border-blue-600 text-blue-600">Experiments</span>
+          <Link href="/admin/listing-overrides" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">Listing Overrides</Link>
         </div>
 
         <div className="flex items-center justify-between mb-6">

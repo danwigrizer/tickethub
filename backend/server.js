@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, appendFileSync, m
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import experimentsRouter, { initExperiments, resolveExperimentConfig, getActiveExperiment } from './experiments.js';
+import listingOverridesRouter, { initListingOverrides, getGlobalListingOverrides, applyListingOverrides } from './listingOverrides.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -631,10 +632,14 @@ initExperiments({
   loadConfig,
   migrateConfig,
   migrateOverrides,
+  getGlobalListingOverrides,
   logsDir: LOGS_DIR,
   configDir: join(__dirname, 'config')
 });
 app.use(experimentsRouter);
+
+initListingOverrides({ logsDir: LOGS_DIR, listings: mockListings });
+app.use(listingOverridesRouter);
 
 // Helper function to get stadium map data for a venue
 function getStadiumMapData(venueName) {
@@ -1358,15 +1363,17 @@ function getUrgencyText(listing, level, demandConfig) {
 }
 
 // Transform listing based on configuration
-function transformListing(listing, config, allListingsForEvent = []) {
+function transformListing(rawListing, config, allListingsForEvent = [], listingOverrides = {}) {
+  // Apply per-listing field overrides before any calculations
+  const listing = applyListingOverrides(rawListing, listingOverrides);
   const transformed = { ...listing };
-  
+
   // Format seats
   transformed.seatsDisplay = formatSeats(listing.seats);
-  
+
   // Format prices
   transformed.pricePerTicketFormatted = formatPrice(listing.pricePerTicket, config);
-  
+
   switch (config.pricing.feeVisibility) {
     case 'hidden':
       transformed.totalPrice = listing.pricePerTicket;
@@ -1422,10 +1429,10 @@ function transformListing(listing, config, allListingsForEvent = []) {
     transformed.originalPrice = listing.price7DaysAgo;
     transformed.originalPriceFormatted = formatPrice(listing.price7DaysAgo, config);
   }
-  
+
   // Calculate scores and relative value
-  const eventListings = allListingsForEvent.length > 0 
-    ? allListingsForEvent 
+  const eventListings = allListingsForEvent.length > 0
+    ? allListingsForEvent
     : mockListings.filter(l => l.eventId === listing.eventId);
   
   // Deal score (conditionally)
@@ -1816,12 +1823,15 @@ app.get('/api/events/:id', (req, res) => {
 
 // Get listings for an event
 app.get('/api/events/:id/listings', (req, res) => {
-  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  const { config, experimentId, variantId, listingOverrides } = resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
   const eventId = parseInt(req.params.id);
-  let listings = mockListings.filter(l => l.eventId === eventId);
-  
-  // Apply filters
+  // Apply listing overrides to raw data before filtering/sorting
+  let listings = mockListings
+    .filter(l => l.eventId === eventId)
+    .map(l => applyListingOverrides(l, listingOverrides));
+
+  // Apply filters (using overridden prices)
   if (req.query.minPrice) {
     const minPrice = parseFloat(req.query.minPrice);
     listings = listings.filter(l => l.pricePerTicket >= minPrice);
@@ -1868,20 +1878,23 @@ app.get('/api/events/:id/listings', (req, res) => {
       break;
   }
   
-  const transformed = listings.map(listing => transformListing(listing, config, listings));
+  const transformed = listings.map(listing => transformListing(listing, config, listings, listingOverrides));
   res.json(transformed);
 });
 
 // Get single listing
 app.get('/api/listings/:id', (req, res) => {
-  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  const { config, experimentId, variantId, listingOverrides } = resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
   const listing = mockListings.find(l => l.id === parseInt(req.params.id));
   if (!listing) {
     return res.status(404).json({ error: 'Listing not found' });
   }
-  const eventListings = mockListings.filter(l => l.eventId === listing.eventId);
-  const transformed = transformListing(listing, config, eventListings);
+  // Apply overrides to peer listings so relative scores use overridden prices
+  const eventListings = mockListings
+    .filter(l => l.eventId === listing.eventId)
+    .map(l => applyListingOverrides(l, listingOverrides));
+  const transformed = transformListing(listing, config, eventListings, listingOverrides);
   const event = mockEvents.find(e => e.id === listing.eventId);
   transformed.event = transformEvent(event, config, mockListings);
   res.json(transformed);
@@ -1946,19 +1959,21 @@ function getCart(sessionId) {
 }
 
 app.get('/api/cart', (req, res) => {
-  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+  const { config, experimentId, variantId, listingOverrides } = resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
   const cart = getCart(req.sessionId);
   const cartItems = Object.entries(cart).map(([listingId, quantity]) => {
     const listing = mockListings.find(l => l.id === parseInt(listingId));
     if (!listing) return null;
 
-    const eventListings = mockListings.filter(l => l.eventId === listing.eventId);
+    const eventListings = mockListings
+      .filter(l => l.eventId === listing.eventId)
+      .map(l => applyListingOverrides(l, listingOverrides));
     const event = mockEvents.find(e => e.id === listing.eventId);
     return {
       listingId: parseInt(listingId),
       quantity,
-      listing: transformListing(listing, config, eventListings),
+      listing: transformListing(listing, config, eventListings, listingOverrides),
       event: transformEvent(event, config, mockListings)
     };
   }).filter(item => item !== null);

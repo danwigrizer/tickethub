@@ -159,6 +159,7 @@ export default function ExperimentDetailPage() {
           <Link href="/admin" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">Configuration</Link>
           <Link href="/admin/sessions" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">Sessions</Link>
           <Link href="/admin/experiments" className="pb-2 font-semibold border-b-2 border-blue-600 text-blue-600">Experiments</Link>
+          <Link href="/admin/listing-overrides" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">Listing Overrides</Link>
         </div>
 
         {error && <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-lg">{error}</div>}

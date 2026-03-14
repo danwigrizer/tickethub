@@ -202,6 +202,9 @@ export default function SessionsPage() {
           <Link href="/admin/experiments" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
             Experiments
           </Link>
+          <Link href="/admin/listing-overrides" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
+            Listing Overrides
+          </Link>
         </div>
 
         <h1 className="text-3xl font-bold mb-2">Session Tracking</h1>

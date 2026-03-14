@@ -365,6 +365,9 @@ export default function Admin() {
           <Link href="/admin/experiments" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
             Experiments
           </Link>
+          <Link href="/admin/listing-overrides" className="pb-2 font-semibold text-gray-500 hover:text-gray-900">
+            Listing Overrides
+          </Link>
         </div>
 
         {activeExperiment && (

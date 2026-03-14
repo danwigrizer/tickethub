@@ -10,6 +10,7 @@ let requestLogs = null;
 let loadConfig = null;
 let migrateConfig = null;
 let migrateOverrides = null;
+let getGlobalListingOverrides = null;
 let logsDir = null;
 let configDir = null;
 
@@ -94,20 +95,22 @@ function assignVariant(sessionId, experiment) {
 // ========== Config Resolution ==========
 
 export function resolveExperimentConfig(sessionId) {
+  const globalOverrides = getGlobalListingOverrides ? getGlobalListingOverrides() : {};
+
   // Find the running experiment (only one allowed)
   const activeExperiment = [...experiments.values()].find(e => e.status === 'running');
 
   if (!activeExperiment) {
-    return { config: loadConfig(), experimentId: null, variantId: null };
+    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
 
   // Check targeting rules
   const session = sessions.get(sessionId);
   if (activeExperiment.targeting?.agentOnly && session && !session.isAgent) {
-    return { config: loadConfig(), experimentId: null, variantId: null };
+    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
   if (activeExperiment.targeting?.regularOnly && session && session.isAgent) {
-    return { config: loadConfig(), experimentId: null, variantId: null };
+    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
 
   // Assign or retrieve variant
@@ -115,7 +118,7 @@ export function resolveExperimentConfig(sessionId) {
   const variant = activeExperiment.variants.find(v => v.id === variantId);
 
   if (!variant || !activeExperiment.baseConfig) {
-    return { config: loadConfig(), experimentId: null, variantId: null };
+    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
 
   // Merge base config + variant overrides (per-section shallow merge)
@@ -129,7 +132,15 @@ export function resolveExperimentConfig(sessionId) {
     behavior: { ...activeExperiment.baseConfig.behavior, ...(variant.overrides?.behavior || {}) },
   };
 
-  return { config, experimentId: activeExperiment.id, variantId };
+  // Merge global listing overrides + variant-specific listing overrides
+  const mergedListingOverrides = { ...globalOverrides };
+  if (variant.listingOverrides) {
+    for (const [id, fields] of Object.entries(variant.listingOverrides)) {
+      mergedListingOverrides[id] = { ...(mergedListingOverrides[id] || {}), ...fields };
+    }
+  }
+
+  return { config, experimentId: activeExperiment.id, variantId, listingOverrides: mergedListingOverrides };
 }
 
 export function getActiveExperiment() {
@@ -218,6 +229,7 @@ router.post('/api/experiments', (req, res) => {
       name: v.name || (i === 0 ? 'Control' : `Variant ${String.fromCharCode(65 + i - 1)}`),
       description: v.description || '',
       overrides: v.overrides || {},
+      listingOverrides: v.listingOverrides || {},
       trafficPercent: v.trafficPercent
     })),
     assignments: {},
@@ -259,6 +271,7 @@ router.put('/api/experiments/:id', (req, res) => {
       name: v.name || (i === 0 ? 'Control' : `Variant ${String.fromCharCode(65 + i - 1)}`),
       description: v.description || '',
       overrides: v.overrides || {},
+      listingOverrides: v.listingOverrides || {},
       trafficPercent: v.trafficPercent
     }));
   }
@@ -495,12 +508,13 @@ router.get('/api/experiments/:id/export', (req, res) => {
 
 // ========== Init ==========
 
-export function initExperiments({ sessions: s, requestLogs: r, loadConfig: lc, migrateConfig: mc, migrateOverrides: mo, logsDir: ld, configDir: cd }) {
+export function initExperiments({ sessions: s, requestLogs: r, loadConfig: lc, migrateConfig: mc, migrateOverrides: mo, getGlobalListingOverrides: glo, logsDir: ld, configDir: cd }) {
   sessions = s;
   requestLogs = r;
   loadConfig = lc;
   migrateConfig = mc;
   migrateOverrides = mo;
+  getGlobalListingOverrides = glo || null;
   logsDir = ld;
   configDir = cd;
   experimentsFile = join(ld, 'experiments.json');
