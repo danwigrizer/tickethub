@@ -52,6 +52,7 @@ export default function ListingOverridesPage() {
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null)
   const [listings, setListings] = useState<Listing[]>([])
   const [overrides, setOverrides] = useState<Record<string, FieldOverrides>>({})
+  const [rawListings, setRawListings] = useState<Record<number, Listing>>({})
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editFields, setEditFields] = useState<FieldOverrides>({})
   const [message, setMessage] = useState('')
@@ -88,16 +89,23 @@ export default function ListingOverridesPage() {
 
   const fetchListings = async (eventId: number) => {
     const url = `${API_URL}/events/${eventId}/listings?sort=price_asc`
+    const rawUrl = `${API_URL}/events/${eventId}/listings/raw`
     console.log('[ListingOverrides] Fetching listings from:', url)
     try {
-      const res = await fetch(url)
-      console.log('[ListingOverrides] Listings response:', res.status, res.statusText)
+      const [res, rawRes] = await Promise.all([fetch(url), fetch(rawUrl)])
+      console.log('[ListingOverrides] Listings response:', res.status, '| Raw:', rawRes.status)
       if (!res.ok) {
         const text = await res.text()
         console.error('[ListingOverrides] Listings error body:', text)
         return
       }
       setListings(await res.json())
+      if (rawRes.ok) {
+        const rawData: Listing[] = await rawRes.json()
+        const rawMap: Record<number, Listing> = {}
+        for (const l of rawData) rawMap[l.id] = l
+        setRawListings(rawMap)
+      }
     } catch (error) {
       console.error('[ListingOverrides] Listings fetch error:', error)
     }
@@ -285,19 +293,49 @@ export default function ListingOverridesPage() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {listings.map(listing => {
-                  const hasOverride = !!overrides[listing.id]
+                  const lo = overrides[listing.id] || null
+                  const hasOverride = !!lo
                   const isEditing = editingId === listing.id
+
+                  const raw = rawListings[listing.id]
+
+                  // Helper to render a cell value with override indicator
+                  const renderCell = (field: string, format?: (v: number) => string) => {
+                    const overrideVal = lo?.[field]
+                    const baseVal = raw ? (raw as unknown as Record<string, unknown>)[field] : undefined
+                    if (overrideVal !== undefined && baseVal !== undefined && overrideVal !== baseVal) {
+                      const formatted = format ? format(overrideVal as number) : String(overrideVal)
+                      const baseFormatted = format ? format(baseVal as number) : String(baseVal)
+                      return (
+                        <div>
+                          <span className="font-medium text-orange-700">{formatted}</span>
+                          <span className="ml-1.5 text-gray-400 line-through text-xs">{baseFormatted}</span>
+                        </div>
+                      )
+                    }
+                    // No override — show base value
+                    const displayVal = baseVal ?? (listing as unknown as Record<string, unknown>)[field]
+                    const formatted = format && displayVal !== undefined ? format(displayVal as number) : String(displayVal ?? '')
+                    return <span>{formatted}</span>
+                  }
+
+                  const fmtPrice = (v: number) => `$${v.toFixed(2)}`
+
                   return (
                     <tr key={listing.id} className={hasOverride ? 'bg-orange-50' : ''}>
                       <td className="px-4 py-3 text-sm font-mono">{listing.id}</td>
                       <td className="px-4 py-3 text-sm">{listing.section} / {listing.row}</td>
-                      <td className="px-4 py-3 text-sm font-medium">${listing.pricePerTicket?.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-sm">${listing.fees?.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-sm">{listing.quantity}</td>
-                      <td className="px-4 py-3 text-sm">{listing.sellerName}</td>
+                      <td className="px-4 py-3 text-sm font-medium">{renderCell('pricePerTicket', fmtPrice)}</td>
+                      <td className="px-4 py-3 text-sm">{renderCell('fees', fmtPrice)}</td>
+                      <td className="px-4 py-3 text-sm">{renderCell('quantity')}</td>
+                      <td className="px-4 py-3 text-sm">{renderCell('sellerName')}</td>
                       <td className="px-4 py-3 text-sm">
                         {hasOverride ? (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">Overridden</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                              {Object.keys(lo!).length} field{Object.keys(lo!).length !== 1 ? 's' : ''}
+                            </span>
+                          </div>
                         ) : (
                           <span className="text-gray-400 text-xs">Default</span>
                         )}
@@ -312,7 +350,7 @@ export default function ListingOverridesPage() {
                           <div className="flex gap-2">
                             <button onClick={() => startEditing(listing.id)} className="text-xs px-2 py-1 border rounded hover:bg-gray-50">Edit</button>
                             {hasOverride && (
-                              <button onClick={() => deleteOverride(listing.id)} className="text-xs px-2 py-1 border border-red-300 text-red-600 rounded hover:bg-red-50">Clear</button>
+                              <button onClick={() => deleteOverride(listing.id)} className="text-xs px-2 py-1 border border-red-300 text-red-600 rounded hover:bg-red-50">Revert</button>
                             )}
                           </div>
                         )}

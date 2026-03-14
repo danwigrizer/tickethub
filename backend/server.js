@@ -1905,6 +1905,25 @@ app.get('/api/listings/:id', (req, res) => {
   res.json(transformed);
 });
 
+// Get raw (base) listings for an event — no overrides applied, for admin comparison
+app.get('/api/events/:id/listings/raw', (req, res) => {
+  const eventId = parseInt(req.params.id);
+  const listings = mockListings.filter(l => l.eventId === eventId);
+  res.json(listings.map(l => ({
+    id: l.id,
+    section: l.section,
+    row: l.row,
+    pricePerTicket: l.pricePerTicket,
+    fees: l.fees,
+    quantity: l.quantity,
+    sellerName: l.sellerName,
+    sellerRating: l.sellerRating,
+    demandLevel: l.demandLevel,
+    viewCount: l.viewCount,
+    viewsLast24h: l.viewsLast24h,
+  })));
+});
+
 // Update listing image
 app.put('/api/listings/:id/image', (req, res) => {
   const listingId = parseInt(req.params.id);
