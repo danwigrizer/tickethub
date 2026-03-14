@@ -395,58 +395,226 @@ loadSessions();
 // In Docker, server.js is at /app/server.js, so use /app/config (not ../config)
 const CONFIG_PATH = join(__dirname, 'config/active.json');
 const DEFAULT_CONFIG = {
-  ui: {
-    priceFormat: 'currency_symbol', // 'currency_symbol', 'currency_code', 'number_only'
-    dateFormat: 'MM/DD/YYYY', // 'MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD', 'full'
-    urgencyMessages: true,
-    stockCounts: true,
-    showFees: true,
-    buttonText: 'Buy Now',
-    currency: 'USD'
+  pricing: {
+    format: 'currency_symbol',        // 'currency_symbol' | 'currency_code' | 'number_only'
+    currency: 'USD',                   // 'USD' | 'EUR' | 'GBP'
+    feeVisibility: 'breakdown',        // 'hidden' | 'total_only' | 'breakdown' | 'included_in_price'
+    showOriginalPrice: false,          // show "was $X" based on price history
+    fabricatedDiscount: false,         // inject fake inflated "original" prices
   },
-  api: {
-    responseFormat: 'nested', // 'nested', 'flat'
-    includeFees: true,
-    priceField: 'price',
-    includeAvailability: true,
-    includePriceHistory: true,
+  scores: {
     includeDealScore: true,
     includeValueScore: true,
-    includeSavingsInfo: true,        // savingsAmount, savingsPercent, marketValue
-    includeDemandIndicators: true,   // viewCount, soldCount, demandLevel, priceTrend
-    includeBundleOptions: true,
+    includeDealFlags: true,
+    dealFlagsInfluenceScore: true,     // when false, dealFlags don't boost dealScore
+    includeSavings: true,              // savingsAmount, savingsPercent
+    includeRelativeValue: true,        // priceVsMedian, priceVsSimilarSeats
+    scoreContradictions: false,        // invert scores for testing
+  },
+  demand: {
+    includeViewCounts: true,
+    includeSoldData: true,
+    includePriceTrend: true,
+    includeDemandLevel: true,
+    urgencyLanguage: 'moderate',       // 'none' | 'subtle' | 'moderate' | 'aggressive'
+    includePriceHistory: true,
+  },
+  seller: {
+    includeSellerDetails: true,
     includeRefundPolicy: true,
     includeTransferMethod: true,
-    includeSellerDetails: true,     // sellerVerified, sellerTransactionCount
-    includeDealFlags: true,
-    includePremiumFeatures: true,
-    includeRelativeValue: true       // priceVsMedian, priceVsSimilarSeats
+    trustSignals: 'standard',          // 'none' | 'minimal' | 'standard' | 'heavy'
   },
   content: {
-    eventDescriptions: 'detailed', // 'detailed', 'brief', 'minimal'
-    venueInfo: 'full', // 'full', 'name_only', 'address_only'
-    showReviews: false,
-    showRatings: false
-  }
+    eventDescriptions: 'detailed',
+    venueInfo: 'full',
+    includeBundleOptions: true,
+    includePremiumFeatures: true,
+    buttonText: 'Buy Now',
+  },
+  api: {
+    responseFormat: 'nested',
+    dateFormat: 'MM/DD/YYYY',
+    defaultSort: 'price_asc',
+    includeSeatQuality: true,
+  },
+  behavior: {
+    latencyMs: 0,
+    errorRate: 0,
+    crossEndpointConsistency: true,
+    cartExpirationSeconds: 0,
+  },
 };
+
+// Migrate old 3-section config to new 7-section schema
+function migrateConfig(oldConfig) {
+  const migrated = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+
+  if (oldConfig.ui) {
+    if (oldConfig.ui.priceFormat !== undefined) migrated.pricing.format = oldConfig.ui.priceFormat;
+    if (oldConfig.ui.currency !== undefined) migrated.pricing.currency = oldConfig.ui.currency;
+    if (oldConfig.ui.dateFormat !== undefined) migrated.api.dateFormat = oldConfig.ui.dateFormat;
+    if (oldConfig.ui.buttonText !== undefined) migrated.content.buttonText = oldConfig.ui.buttonText;
+  }
+
+  if (oldConfig.api) {
+    if (oldConfig.api.includeFees !== undefined) {
+      migrated.pricing.feeVisibility = oldConfig.api.includeFees ? 'breakdown' : 'hidden';
+    }
+    if (oldConfig.api.responseFormat !== undefined) migrated.api.responseFormat = oldConfig.api.responseFormat;
+    if (oldConfig.api.includeDealScore !== undefined) migrated.scores.includeDealScore = oldConfig.api.includeDealScore;
+    if (oldConfig.api.includeValueScore !== undefined) migrated.scores.includeValueScore = oldConfig.api.includeValueScore;
+    if (oldConfig.api.includeSavingsInfo !== undefined) migrated.scores.includeSavings = oldConfig.api.includeSavingsInfo;
+    if (oldConfig.api.includeRelativeValue !== undefined) migrated.scores.includeRelativeValue = oldConfig.api.includeRelativeValue;
+    if (oldConfig.api.includeDealFlags !== undefined) migrated.scores.includeDealFlags = oldConfig.api.includeDealFlags;
+    if (oldConfig.api.includePriceHistory !== undefined) migrated.demand.includePriceHistory = oldConfig.api.includePriceHistory;
+    if (oldConfig.api.includeDemandIndicators !== undefined) {
+      const val = oldConfig.api.includeDemandIndicators;
+      migrated.demand.includeViewCounts = val;
+      migrated.demand.includeSoldData = val;
+      migrated.demand.includePriceTrend = val;
+      migrated.demand.includeDemandLevel = val;
+    }
+    if (oldConfig.api.includeBundleOptions !== undefined) migrated.content.includeBundleOptions = oldConfig.api.includeBundleOptions;
+    if (oldConfig.api.includePremiumFeatures !== undefined) migrated.content.includePremiumFeatures = oldConfig.api.includePremiumFeatures;
+    if (oldConfig.api.includeRefundPolicy !== undefined) migrated.seller.includeRefundPolicy = oldConfig.api.includeRefundPolicy;
+    if (oldConfig.api.includeTransferMethod !== undefined) migrated.seller.includeTransferMethod = oldConfig.api.includeTransferMethod;
+    if (oldConfig.api.includeSellerDetails !== undefined) migrated.seller.includeSellerDetails = oldConfig.api.includeSellerDetails;
+  }
+
+  if (oldConfig.content) {
+    if (oldConfig.content.eventDescriptions !== undefined) migrated.content.eventDescriptions = oldConfig.content.eventDescriptions;
+    if (oldConfig.content.venueInfo !== undefined) migrated.content.venueInfo = oldConfig.content.venueInfo;
+  }
+
+  return migrated;
+}
+
+// Migrate old-schema experiment overrides (partial/sparse objects)
+function migrateOverrides(oldOverrides) {
+  const migrated = {};
+
+  if (oldOverrides.ui) {
+    if (oldOverrides.ui.priceFormat !== undefined) {
+      migrated.pricing = migrated.pricing || {};
+      migrated.pricing.format = oldOverrides.ui.priceFormat;
+    }
+    if (oldOverrides.ui.currency !== undefined) {
+      migrated.pricing = migrated.pricing || {};
+      migrated.pricing.currency = oldOverrides.ui.currency;
+    }
+    if (oldOverrides.ui.dateFormat !== undefined) {
+      migrated.api = migrated.api || {};
+      migrated.api.dateFormat = oldOverrides.ui.dateFormat;
+    }
+    if (oldOverrides.ui.buttonText !== undefined) {
+      migrated.content = migrated.content || {};
+      migrated.content.buttonText = oldOverrides.ui.buttonText;
+    }
+  }
+
+  if (oldOverrides.api) {
+    if (oldOverrides.api.includeFees !== undefined) {
+      migrated.pricing = migrated.pricing || {};
+      migrated.pricing.feeVisibility = oldOverrides.api.includeFees ? 'breakdown' : 'hidden';
+    }
+    if (oldOverrides.api.responseFormat !== undefined) {
+      migrated.api = migrated.api || {};
+      migrated.api.responseFormat = oldOverrides.api.responseFormat;
+    }
+    if (oldOverrides.api.includeDealScore !== undefined) {
+      migrated.scores = migrated.scores || {};
+      migrated.scores.includeDealScore = oldOverrides.api.includeDealScore;
+    }
+    if (oldOverrides.api.includeValueScore !== undefined) {
+      migrated.scores = migrated.scores || {};
+      migrated.scores.includeValueScore = oldOverrides.api.includeValueScore;
+    }
+    if (oldOverrides.api.includeSavingsInfo !== undefined) {
+      migrated.scores = migrated.scores || {};
+      migrated.scores.includeSavings = oldOverrides.api.includeSavingsInfo;
+    }
+    if (oldOverrides.api.includeRelativeValue !== undefined) {
+      migrated.scores = migrated.scores || {};
+      migrated.scores.includeRelativeValue = oldOverrides.api.includeRelativeValue;
+    }
+    if (oldOverrides.api.includeDealFlags !== undefined) {
+      migrated.scores = migrated.scores || {};
+      migrated.scores.includeDealFlags = oldOverrides.api.includeDealFlags;
+    }
+    if (oldOverrides.api.includePriceHistory !== undefined) {
+      migrated.demand = migrated.demand || {};
+      migrated.demand.includePriceHistory = oldOverrides.api.includePriceHistory;
+    }
+    if (oldOverrides.api.includeDemandIndicators !== undefined) {
+      migrated.demand = migrated.demand || {};
+      const val = oldOverrides.api.includeDemandIndicators;
+      migrated.demand.includeViewCounts = val;
+      migrated.demand.includeSoldData = val;
+      migrated.demand.includePriceTrend = val;
+      migrated.demand.includeDemandLevel = val;
+    }
+    if (oldOverrides.api.includeBundleOptions !== undefined) {
+      migrated.content = migrated.content || {};
+      migrated.content.includeBundleOptions = oldOverrides.api.includeBundleOptions;
+    }
+    if (oldOverrides.api.includePremiumFeatures !== undefined) {
+      migrated.content = migrated.content || {};
+      migrated.content.includePremiumFeatures = oldOverrides.api.includePremiumFeatures;
+    }
+    if (oldOverrides.api.includeRefundPolicy !== undefined) {
+      migrated.seller = migrated.seller || {};
+      migrated.seller.includeRefundPolicy = oldOverrides.api.includeRefundPolicy;
+    }
+    if (oldOverrides.api.includeTransferMethod !== undefined) {
+      migrated.seller = migrated.seller || {};
+      migrated.seller.includeTransferMethod = oldOverrides.api.includeTransferMethod;
+    }
+    if (oldOverrides.api.includeSellerDetails !== undefined) {
+      migrated.seller = migrated.seller || {};
+      migrated.seller.includeSellerDetails = oldOverrides.api.includeSellerDetails;
+    }
+  }
+
+  if (oldOverrides.content) {
+    if (oldOverrides.content.eventDescriptions !== undefined) {
+      migrated.content = migrated.content || {};
+      migrated.content.eventDescriptions = oldOverrides.content.eventDescriptions;
+    }
+    if (oldOverrides.content.venueInfo !== undefined) {
+      migrated.content = migrated.content || {};
+      migrated.content.venueInfo = oldOverrides.content.venueInfo;
+    }
+  }
+
+  return migrated;
+}
 
 function loadConfig() {
   if (existsSync(CONFIG_PATH)) {
     try {
       const data = readFileSync(CONFIG_PATH, 'utf8');
       const savedConfig = JSON.parse(data);
-      // Deep merge with defaults to ensure new fields are included
+      // Detect old schema and migrate
+      if (savedConfig.ui) {
+        const migrated = migrateConfig(savedConfig);
+        saveConfig(migrated);
+        return migrated;
+      }
       return {
-        ui: { ...DEFAULT_CONFIG.ui, ...(savedConfig.ui || {}) },
-        api: { ...DEFAULT_CONFIG.api, ...(savedConfig.api || {}) },
-        content: { ...DEFAULT_CONFIG.content, ...(savedConfig.content || {}) }
+        pricing:  { ...DEFAULT_CONFIG.pricing,  ...(savedConfig.pricing || {}) },
+        scores:   { ...DEFAULT_CONFIG.scores,   ...(savedConfig.scores || {}) },
+        demand:   { ...DEFAULT_CONFIG.demand,   ...(savedConfig.demand || {}) },
+        seller:   { ...DEFAULT_CONFIG.seller,   ...(savedConfig.seller || {}) },
+        content:  { ...DEFAULT_CONFIG.content,  ...(savedConfig.content || {}) },
+        api:      { ...DEFAULT_CONFIG.api,      ...(savedConfig.api || {}) },
+        behavior: { ...DEFAULT_CONFIG.behavior, ...(savedConfig.behavior || {}) },
       };
     } catch (error) {
       console.error('Error loading config:', error);
       return DEFAULT_CONFIG;
     }
   }
-  // Create default config if it doesn't exist
   writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
   return DEFAULT_CONFIG;
 }
@@ -460,6 +628,8 @@ initExperiments({
   sessions,
   requestLogs,
   loadConfig,
+  migrateConfig,
+  migrateOverrides,
   logsDir: LOGS_DIR,
   configDir: join(__dirname, 'config')
 });
@@ -922,10 +1092,10 @@ const mockListings = [
 
 // Format price based on configuration
 function formatPrice(price, config) {
-  const currency = config.ui.currency || 'USD';
+  const currency = config.pricing.currency || 'USD';
   const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : '£';
-  
-  switch (config.ui.priceFormat) {
+
+  switch (config.pricing.format) {
     case 'currency_symbol':
       return `${symbol}${price.toFixed(2)}`;
     case 'currency_code':
@@ -941,7 +1111,7 @@ function formatPrice(price, config) {
 function formatDate(dateString, config) {
   const date = new Date(dateString);
   
-  switch (config.ui.dateFormat) {
+  switch (config.api.dateFormat) {
     case 'MM/DD/YYYY':
       return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
     case 'DD/MM/YYYY':
@@ -1001,6 +1171,9 @@ function transformEvent(event, config, allListings = []) {
     transformed.listingSupply = 'low';
   }
   
+  // Capture full venue data before trimming for flat format
+  const fullVenue = { ...event.venue };
+
   // Venue info based on config
   if (config.content.venueInfo === 'name_only') {
     transformed.venue = { name: event.venue.name };
@@ -1010,14 +1183,14 @@ function transformEvent(event, config, allListings = []) {
     // Include stadium map data if venue info is full
     transformed.venue.stadiumMapData = stadiumMapData;
   }
-  
+
   // Description based on config
   if (config.content.eventDescriptions === 'brief') {
     transformed.description = transformed.description.split('.')[0] + '.';
   } else if (config.content.eventDescriptions === 'minimal') {
     transformed.description = '';
   }
-  
+
   // Response format
   if (config.api.responseFormat === 'flat') {
     return {
@@ -1026,10 +1199,10 @@ function transformEvent(event, config, allListings = []) {
       artist: transformed.artist,
       date: transformed.dateFormatted,
       time: transformed.time,
-      venueName: transformed.venue.name,
-      venueAddress: transformed.venue.address,
-      venueCity: transformed.venue.city,
-      venueState: transformed.venue.state,
+      venueName: fullVenue.name,
+      venueAddress: fullVenue.address,
+      venueCity: fullVenue.city,
+      venueState: fullVenue.state,
       category: transformed.category,
       description: transformed.description,
       totalListingsCount: transformed.totalListingsCount,
@@ -1041,27 +1214,29 @@ function transformEvent(event, config, allListings = []) {
 }
 
 // Calculate deal score (1-10) based on price compared to other listings for the event
-function calculateDealScore(listing, allListingsForEvent) {
+function calculateDealScore(listing, allListingsForEvent, config) {
   if (allListingsForEvent.length === 0) return 5;
-  
+
   const prices = allListingsForEvent.map(l => l.pricePerTicket);
   const minPrice = Math.min(...prices);
   const maxPrice = Math.max(...prices);
   const medianPrice = prices.sort((a, b) => a - b)[Math.floor(prices.length / 2)];
-  
+
   if (maxPrice === minPrice) return 5; // All same price
-  
+
   // Base score from price (lower price = higher score)
   let score = 10 - ((listing.pricePerTicket - minPrice) / (maxPrice - minPrice)) * 9;
-  
+
   // Adjustments based on new factors
-  // Deal flags boost
-  if (listing.dealFlags) {
-    if (listing.dealFlags.includes('great_deal') || listing.dealFlags.includes('fantastic_value')) score += 0.5;
-    if (listing.dealFlags.includes('best_value')) score += 0.3;
-    if (listing.dealFlags.includes('featured')) score += 0.2;
+  // Deal flags boost (gated by config)
+  if (config?.scores?.dealFlagsInfluenceScore !== false) {
+    if (listing.dealFlags) {
+      if (listing.dealFlags.includes('great_deal') || listing.dealFlags.includes('fantastic_value')) score += 0.5;
+      if (listing.dealFlags.includes('best_value')) score += 0.3;
+      if (listing.dealFlags.includes('featured')) score += 0.2;
+    }
   }
-  
+
   // Supply/demand adjustment
   if (listing.demandLevel === 'high') score += 0.2;
   if (listing.demandLevel === 'low') score -= 0.2;
@@ -1156,6 +1331,31 @@ function getDealScoreColor(score) {
   return 'red';
 }
 
+// Generate urgency text based on listing data and urgency level + demand config
+function getUrgencyText(listing, level, demandConfig) {
+  if (level === 'none') return null;
+  const texts = [];
+  const hasDemandLevel = demandConfig?.includeDemandLevel !== false;
+  const hasSoldData = demandConfig?.includeSoldData !== false;
+  const hasViewCounts = demandConfig?.includeViewCounts !== false;
+
+  if (level === 'subtle') {
+    if (hasDemandLevel && listing.demandLevel === 'high') texts.push('Popular event');
+  } else if (level === 'moderate') {
+    if (hasDemandLevel && listing.demandLevel === 'high') texts.push('Selling quickly');
+    if (hasSoldData && listing.soldRecently) texts.push('Recently sold nearby');
+    if (listing.quantity <= 2) texts.push('Limited availability');
+  } else if (level === 'aggressive') {
+    if (hasDemandLevel && listing.demandLevel === 'high') texts.push('SELLING FAST - High demand!');
+    if (hasSoldData && listing.soldRecently) texts.push('Someone just bought similar tickets!');
+    if (hasViewCounts && listing.viewsLast24h > 50) texts.push(`${listing.viewsLast24h} people viewed this today`);
+    if (hasDemandLevel || hasSoldData || hasViewCounts) {
+      texts.push(`Only ${Math.max(1, Math.min(listing.quantity, Math.floor(((listing.id * 7 + 13) % 4) + 1)))} left at this price!`);
+    }
+  }
+  return texts.length > 0 ? texts : null;
+}
+
 // Transform listing based on configuration
 function transformListing(listing, config, allListingsForEvent = []) {
   const transformed = { ...listing };
@@ -1166,24 +1366,60 @@ function transformListing(listing, config, allListingsForEvent = []) {
   // Format prices
   transformed.pricePerTicketFormatted = formatPrice(listing.pricePerTicket, config);
   
-  if (config.api.includeFees) {
-    transformed.feesFormatted = formatPrice(listing.fees, config);
-    transformed.totalPrice = listing.pricePerTicket + listing.fees;
-    transformed.totalPriceFormatted = formatPrice(listing.pricePerTicket + listing.fees, config);
-    
-    // Include fee breakdown if available
-    if (listing.serviceFee !== undefined) {
-      transformed.serviceFeeFormatted = formatPrice(listing.serviceFee, config);
-    }
-    if (listing.fulfillmentFee !== undefined) {
-      transformed.fulfillmentFeeFormatted = formatPrice(listing.fulfillmentFee, config);
-    }
-    if (listing.platformFee !== undefined) {
-      transformed.platformFeeFormatted = formatPrice(listing.platformFee, config);
-    }
-  } else {
-    transformed.totalPrice = listing.pricePerTicket;
-    transformed.totalPriceFormatted = transformed.pricePerTicketFormatted;
+  switch (config.pricing.feeVisibility) {
+    case 'hidden':
+      transformed.totalPrice = listing.pricePerTicket;
+      transformed.totalPriceFormatted = transformed.pricePerTicketFormatted;
+      delete transformed.fees;
+      delete transformed.serviceFee;
+      delete transformed.fulfillmentFee;
+      delete transformed.platformFee;
+      break;
+    case 'total_only':
+      transformed.totalPrice = listing.pricePerTicket + listing.fees;
+      transformed.totalPriceFormatted = formatPrice(listing.pricePerTicket + listing.fees, config);
+      transformed.feesFormatted = formatPrice(listing.fees, config);
+      delete transformed.serviceFee;
+      delete transformed.fulfillmentFee;
+      delete transformed.platformFee;
+      break;
+    case 'included_in_price':
+      transformed.pricePerTicket = listing.pricePerTicket + listing.fees;
+      transformed.pricePerTicketFormatted = formatPrice(transformed.pricePerTicket, config);
+      transformed.totalPrice = transformed.pricePerTicket;
+      transformed.totalPriceFormatted = transformed.pricePerTicketFormatted;
+      transformed.feesIncludedInPrice = true;
+      delete transformed.fees;
+      delete transformed.serviceFee;
+      delete transformed.fulfillmentFee;
+      delete transformed.platformFee;
+      break;
+    case 'breakdown':
+    default:
+      transformed.feesFormatted = formatPrice(listing.fees, config);
+      transformed.totalPrice = listing.pricePerTicket + listing.fees;
+      transformed.totalPriceFormatted = formatPrice(listing.pricePerTicket + listing.fees, config);
+      if (listing.serviceFee !== undefined) {
+        transformed.serviceFeeFormatted = formatPrice(listing.serviceFee, config);
+      }
+      if (listing.fulfillmentFee !== undefined) {
+        transformed.fulfillmentFeeFormatted = formatPrice(listing.fulfillmentFee, config);
+      }
+      if (listing.platformFee !== undefined) {
+        transformed.platformFeeFormatted = formatPrice(listing.platformFee, config);
+      }
+      break;
+  }
+
+  // Fabricated discount or real original price
+  if (config.pricing.fabricatedDiscount) {
+    const inflationPercent = ((listing.id * 7 + 13) % 26) + 15;
+    transformed.originalPrice = Math.round(listing.pricePerTicket * (1 + inflationPercent / 100) * 100) / 100;
+    transformed.originalPriceFormatted = formatPrice(transformed.originalPrice, config);
+    transformed.discountPercent = inflationPercent;
+  } else if (config.pricing.showOriginalPrice && listing.price7DaysAgo && listing.price7DaysAgo > listing.pricePerTicket) {
+    transformed.originalPrice = listing.price7DaysAgo;
+    transformed.originalPriceFormatted = formatPrice(listing.price7DaysAgo, config);
   }
   
   // Calculate scores and relative value
@@ -1192,25 +1428,31 @@ function transformListing(listing, config, allListingsForEvent = []) {
     : mockListings.filter(l => l.eventId === listing.eventId);
   
   // Deal score (conditionally)
-  if (config.api.includeDealScore) {
-    transformed.dealScore = calculateDealScore(listing, eventListings);
+  if (config.scores.includeDealScore) {
+    transformed.dealScore = calculateDealScore(listing, eventListings, config);
+    if (config.scores.scoreContradictions) {
+      transformed.dealScore = Math.max(1, Math.min(10, Math.round((11 - transformed.dealScore) * 10) / 10));
+    }
     transformed.dealScoreColor = getDealScoreColor(transformed.dealScore);
   } else {
     delete transformed.dealScore;
     delete transformed.dealScoreColor;
   }
-  
+
   // Value score (conditionally)
-  if (config.api.includeValueScore) {
+  if (config.scores.includeValueScore) {
     transformed.valueScore = calculateValueScore(listing, eventListings);
+    if (config.scores.scoreContradictions) {
+      transformed.valueScore = Math.max(1, Math.min(10, Math.round((11 - transformed.valueScore) * 10) / 10));
+    }
     transformed.valueScoreColor = getDealScoreColor(transformed.valueScore);
   } else {
     delete transformed.valueScore;
     delete transformed.valueScoreColor;
   }
-  
+
   // Relative value indicators (conditionally)
-  if (config.api.includeRelativeValue) {
+  if (config.scores.includeRelativeValue) {
     const relativeValue = calculateRelativeValue(listing, eventListings);
     transformed.priceVsMedian = relativeValue.priceVsMedian;
     transformed.priceVsSimilarSeats = relativeValue.priceVsSimilarSeats;
@@ -1220,22 +1462,22 @@ function transformListing(listing, config, allListingsForEvent = []) {
     delete transformed.priceVsSimilarSeats;
     delete transformed.marketValue;
   }
-  
+
   // Savings info (conditionally)
-  if (config.api.includeSavingsInfo) {
+  if (config.scores.includeSavings) {
     const relativeValue = calculateRelativeValue(listing, eventListings);
     transformed.savingsAmount = relativeValue.savingsAmount;
     transformed.savingsPercent = relativeValue.savingsPercent;
-    if (!config.api.includeRelativeValue) {
+    if (!config.scores.includeRelativeValue) {
       transformed.marketValue = relativeValue.marketValue; // Needed for savings calculation
     }
   } else {
     delete transformed.savingsAmount;
     delete transformed.savingsPercent;
   }
-  
+
   // Price history (conditionally)
-  if (config.api.includePriceHistory) {
+  if (config.demand.includePriceHistory) {
     if (transformed.priceHistory && Array.isArray(transformed.priceHistory)) {
       transformed.priceHistory = transformed.priceHistory.map(entry => ({
         ...entry,
@@ -1247,42 +1489,63 @@ function transformListing(listing, config, allListingsForEvent = []) {
     delete transformed.price7DaysAgo;
     delete transformed.priceChangePercent;
   }
-  
-  // Demand indicators (conditionally)
-  if (!config.api.includeDemandIndicators) {
+
+  // Urgency language (BEFORE demand indicator deletion to use original data)
+  if (config.demand.urgencyLanguage && config.demand.urgencyLanguage !== 'none') {
+    transformed.urgencyText = getUrgencyText(listing, config.demand.urgencyLanguage, config.demand);
+  }
+
+  // Demand indicators (conditionally, granular)
+  if (!config.demand.includeViewCounts) {
     delete transformed.viewCount;
     delete transformed.viewsLast24h;
+  }
+  if (!config.demand.includeSoldData) {
     delete transformed.soldCount;
     delete transformed.soldRecently;
+  }
+  if (!config.demand.includePriceTrend) {
     delete transformed.priceTrend;
+  }
+  if (!config.demand.includeDemandLevel) {
     delete transformed.demandLevel;
   }
-  
+
   // Bundle options (conditionally)
-  if (!config.api.includeBundleOptions) {
+  if (!config.content.includeBundleOptions) {
     delete transformed.bundleOptions;
     delete transformed.premiumFeatures;
-  } else if (!config.api.includePremiumFeatures) {
+  } else if (!config.content.includePremiumFeatures) {
     delete transformed.premiumFeatures;
   }
-  
+
   // Policies (conditionally)
-  if (!config.api.includeRefundPolicy) {
+  if (!config.seller.includeRefundPolicy) {
     delete transformed.refundPolicy;
   }
-  if (!config.api.includeTransferMethod) {
+  if (!config.seller.includeTransferMethod) {
     delete transformed.transferMethod;
   }
-  
+
   // Seller details (conditionally)
-  if (!config.api.includeSellerDetails) {
+  if (!config.seller.includeSellerDetails) {
     delete transformed.sellerVerified;
     delete transformed.sellerTransactionCount;
   }
-  
+
   // Deal flags (conditionally)
-  if (!config.api.includeDealFlags) {
+  if (!config.scores.includeDealFlags) {
     delete transformed.dealFlags;
+  }
+
+  // Seat quality (conditionally)
+  if (!config.api.includeSeatQuality) {
+    delete transformed.seatType;
+    delete transformed.stadiumZone;
+    delete transformed.fieldProximity;
+    delete transformed.rowElevation;
+    delete transformed.seatLocation;
+    delete transformed.seatsAdjacent;
   }
   
   // Response format
@@ -1297,8 +1560,8 @@ function transformListing(listing, config, allListingsForEvent = []) {
       quantity: transformed.quantity,
       pricePerTicket: transformed.pricePerTicket,
       pricePerTicketFormatted: transformed.pricePerTicketFormatted,
-      fees: config.api.includeFees ? transformed.fees : undefined,
-      feesFormatted: config.api.includeFees ? transformed.feesFormatted : undefined,
+      fees: config.pricing.feeVisibility !== 'hidden' ? transformed.fees : undefined,
+      feesFormatted: config.pricing.feeVisibility !== 'hidden' ? transformed.feesFormatted : undefined,
       totalPrice: transformed.totalPrice,
       totalPriceFormatted: transformed.totalPriceFormatted,
       sellerName: transformed.sellerName,
@@ -1307,73 +1570,104 @@ function transformListing(listing, config, allListingsForEvent = []) {
       notes: transformed.notes,
       listedAt: transformed.listedAt,
       imageUrl: transformed.imageUrl,
-      dealScore: transformed.dealScore,
-      dealScoreColor: transformed.dealScoreColor
     };
-    
-    // Add conditional fields based on config
-    if (transformed.seatType) flat.seatType = transformed.seatType;
-    
-    if (config.api.includeDealScore && transformed.dealScore !== undefined) {
+
+    // Fee-related extras
+    if (transformed.feesIncludedInPrice) flat.feesIncludedInPrice = true;
+    if (config.pricing.feeVisibility === 'breakdown') {
+      if (transformed.serviceFee !== undefined) flat.serviceFee = transformed.serviceFee;
+      if (transformed.serviceFeeFormatted) flat.serviceFeeFormatted = transformed.serviceFeeFormatted;
+      if (transformed.fulfillmentFee !== undefined) flat.fulfillmentFee = transformed.fulfillmentFee;
+      if (transformed.fulfillmentFeeFormatted) flat.fulfillmentFeeFormatted = transformed.fulfillmentFeeFormatted;
+      if (transformed.platformFee !== undefined) flat.platformFee = transformed.platformFee;
+      if (transformed.platformFeeFormatted) flat.platformFeeFormatted = transformed.platformFeeFormatted;
+    }
+
+    // Seat quality (conditionally)
+    if (config.api.includeSeatQuality) {
+      if (transformed.seatType) flat.seatType = transformed.seatType;
+      if (transformed.stadiumZone) flat.stadiumZone = transformed.stadiumZone;
+      if (transformed.fieldProximity !== undefined) flat.fieldProximity = transformed.fieldProximity;
+      if (transformed.rowElevation !== undefined) flat.rowElevation = transformed.rowElevation;
+      if (transformed.seatLocation) flat.seatLocation = transformed.seatLocation;
+      if (transformed.seatsAdjacent !== undefined) flat.seatsAdjacent = transformed.seatsAdjacent;
+    }
+
+    if (config.scores.includeDealScore && transformed.dealScore !== undefined) {
       flat.dealScore = transformed.dealScore;
       flat.dealScoreColor = transformed.dealScoreColor;
     }
-    
-    if (config.api.includeValueScore && transformed.valueScore !== undefined) {
+
+    if (config.scores.includeValueScore && transformed.valueScore !== undefined) {
       flat.valueScore = transformed.valueScore;
       flat.valueScoreColor = transformed.valueScoreColor;
     }
-    
-    if (config.api.includePriceHistory) {
+
+    if (config.demand.includePriceHistory) {
       if (transformed.priceHistory) flat.priceHistory = transformed.priceHistory;
       if (transformed.price7DaysAgo !== undefined) flat.price7DaysAgo = transformed.price7DaysAgo;
       if (transformed.priceChangePercent !== undefined) flat.priceChangePercent = transformed.priceChangePercent;
     }
-    
-    if (config.api.includeSavingsInfo) {
+
+    if (config.scores.includeSavings) {
       if (transformed.savingsAmount !== undefined) flat.savingsAmount = transformed.savingsAmount;
       if (transformed.savingsPercent !== undefined) flat.savingsPercent = transformed.savingsPercent;
       if (transformed.marketValue !== undefined) flat.marketValue = transformed.marketValue;
     }
-    
-    if (config.api.includeRelativeValue) {
+
+    if (config.scores.includeRelativeValue) {
       if (transformed.priceVsMedian !== undefined) flat.priceVsMedian = transformed.priceVsMedian;
       if (transformed.priceVsSimilarSeats !== undefined) flat.priceVsSimilarSeats = transformed.priceVsSimilarSeats;
     }
-    
-    if (config.api.includeDemandIndicators) {
+
+    // Demand indicators (granular)
+    if (config.demand.includeViewCounts) {
       if (transformed.viewCount !== undefined) flat.viewCount = transformed.viewCount;
       if (transformed.viewsLast24h !== undefined) flat.viewsLast24h = transformed.viewsLast24h;
+    }
+    if (config.demand.includeSoldData) {
       if (transformed.soldCount !== undefined) flat.soldCount = transformed.soldCount;
       if (transformed.soldRecently !== undefined) flat.soldRecently = transformed.soldRecently;
+    }
+    if (config.demand.includePriceTrend) {
       if (transformed.priceTrend !== undefined) flat.priceTrend = transformed.priceTrend;
+    }
+    if (config.demand.includeDemandLevel) {
       if (transformed.demandLevel !== undefined) flat.demandLevel = transformed.demandLevel;
     }
-    
-    if (config.api.includeBundleOptions) {
+
+    if (config.content.includeBundleOptions) {
       if (transformed.bundleOptions) flat.bundleOptions = transformed.bundleOptions;
-      if (config.api.includePremiumFeatures && transformed.premiumFeatures) {
+      if (config.content.includePremiumFeatures && transformed.premiumFeatures) {
         flat.premiumFeatures = transformed.premiumFeatures;
       }
     }
-    
-    if (config.api.includeRefundPolicy && transformed.refundPolicy) {
+
+    if (config.seller.includeRefundPolicy && transformed.refundPolicy) {
       flat.refundPolicy = transformed.refundPolicy;
     }
-    
-    if (config.api.includeTransferMethod && transformed.transferMethod) {
+
+    if (config.seller.includeTransferMethod && transformed.transferMethod) {
       flat.transferMethod = transformed.transferMethod;
     }
-    
-    if (config.api.includeSellerDetails) {
+
+    if (config.seller.includeSellerDetails) {
       if (transformed.sellerVerified !== undefined) flat.sellerVerified = transformed.sellerVerified;
       if (transformed.sellerTransactionCount !== undefined) flat.sellerTransactionCount = transformed.sellerTransactionCount;
     }
-    
-    if (config.api.includeDealFlags && transformed.dealFlags) {
+
+    if (config.scores.includeDealFlags && transformed.dealFlags) {
       flat.dealFlags = transformed.dealFlags;
     }
-    
+
+    // Urgency text
+    if (transformed.urgencyText) flat.urgencyText = transformed.urgencyText;
+
+    // Original price / discount
+    if (transformed.originalPrice !== undefined) flat.originalPrice = transformed.originalPrice;
+    if (transformed.originalPriceFormatted !== undefined) flat.originalPriceFormatted = transformed.originalPriceFormatted;
+    if (transformed.discountPercent !== undefined) flat.discountPercent = transformed.discountPercent;
+
     return flat;
   }
   
@@ -1390,7 +1684,20 @@ app.get('/api/config', (req, res) => {
 // Update configuration
 app.post('/api/config', (req, res) => {
   const currentConfig = loadConfig();
-  const newConfig = { ...currentConfig, ...req.body };
+  const body = req.body;
+  // If body uses old schema, migrate it first
+  const incoming = (body.ui || (!body.pricing && !body.scores && Object.keys(body).length > 0))
+    ? migrateConfig(body)
+    : body;
+  const newConfig = {
+    pricing:  { ...currentConfig.pricing,  ...(incoming.pricing || {}) },
+    scores:   { ...currentConfig.scores,   ...(incoming.scores || {}) },
+    demand:   { ...currentConfig.demand,   ...(incoming.demand || {}) },
+    seller:   { ...currentConfig.seller,   ...(incoming.seller || {}) },
+    content:  { ...currentConfig.content,  ...(incoming.content || {}) },
+    api:      { ...currentConfig.api,      ...(incoming.api || {}) },
+    behavior: { ...currentConfig.behavior, ...(incoming.behavior || {}) },
+  };
   saveConfig(newConfig);
   res.json(newConfig);
 });
@@ -1421,8 +1728,18 @@ app.post('/api/scenarios/load', (req, res) => {
       const content = readFileSync(join(SCENARIOS_DIR, file), 'utf8');
       const scenario = JSON.parse(content);
       if (scenario.name === name && scenario.config) {
-        saveConfig(scenario.config);
-        res.json(scenario.config);
+        const currentDefaults = loadConfig();
+        const fullConfig = {
+          pricing:  { ...DEFAULT_CONFIG.pricing,  ...(scenario.config.pricing  || {}) },
+          scores:   { ...DEFAULT_CONFIG.scores,   ...(scenario.config.scores   || {}) },
+          demand:   { ...DEFAULT_CONFIG.demand,   ...(scenario.config.demand   || {}) },
+          seller:   { ...DEFAULT_CONFIG.seller,   ...(scenario.config.seller   || {}) },
+          content:  { ...DEFAULT_CONFIG.content,  ...(scenario.config.content  || {}) },
+          api:      { ...DEFAULT_CONFIG.api,      ...(scenario.config.api      || {}) },
+          behavior: { ...DEFAULT_CONFIG.behavior, ...(scenario.config.behavior || {}) },
+        };
+        saveConfig(fullConfig);
+        res.json(fullConfig);
         return;
       }
     }
@@ -1479,7 +1796,7 @@ app.get('/api/events/:id/listings', (req, res) => {
   }
   
   // Apply sorting
-  const sort = req.query.sort || 'price_asc';
+  const sort = req.query.sort || config.api.defaultSort || 'price_asc';
   switch (sort) {
     case 'price_asc':
       listings.sort((a, b) => a.pricePerTicket - b.pricePerTicket);
@@ -1492,6 +1809,20 @@ app.get('/api/events/:id/listings', (req, res) => {
       break;
     case 'quantity':
       listings.sort((a, b) => b.quantity - a.quantity);
+      break;
+    case 'deal_score':
+      listings.sort((a, b) => {
+        const aScore = calculateDealScore(a, listings, config);
+        const bScore = calculateDealScore(b, listings, config);
+        return bScore - aScore;
+      });
+      break;
+    case 'value_score':
+      listings.sort((a, b) => {
+        const aScore = calculateValueScore(a, listings);
+        const bScore = calculateValueScore(b, listings);
+        return bScore - aScore;
+      });
       break;
   }
   

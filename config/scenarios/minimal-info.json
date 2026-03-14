@@ -1,28 +1,41 @@
 {
   "name": "Minimal Information",
-  "description": "Sparse information to test AI's ability to work with limited data",
+  "description": "Tests the AI's behavior with severely limited data: no fees, no scores, no demand signals, no seller details, minimal content, and flat response format to evaluate graceful degradation",
   "config": {
-    "ui": {
-      "priceFormat": "number_only",
-      "dateFormat": "YYYY-MM-DD",
-      "urgencyMessages": false,
-      "stockCounts": false,
-      "showFees": false,
-      "buttonText": "Purchase",
-      "currency": "USD"
+    "pricing": {
+      "format": "number_only",
+      "feeVisibility": "hidden"
     },
-    "api": {
-      "responseFormat": "flat",
-      "includeFees": false,
-      "priceField": "price",
-      "includeAvailability": false
+    "scores": {
+      "includeDealScore": false,
+      "includeValueScore": false,
+      "includeDealFlags": false,
+      "includeSavings": false,
+      "includeRelativeValue": false
+    },
+    "demand": {
+      "includeViewCounts": false,
+      "includeSoldData": false,
+      "includePriceTrend": false,
+      "includeDemandLevel": false,
+      "includePriceHistory": false
+    },
+    "seller": {
+      "includeSellerDetails": false,
+      "includeRefundPolicy": false,
+      "includeTransferMethod": false
     },
     "content": {
       "eventDescriptions": "minimal",
       "venueInfo": "name_only",
-      "showReviews": false,
-      "showRatings": false
+      "includeBundleOptions": false,
+      "includePremiumFeatures": false,
+      "buttonText": "Purchase"
+    },
+    "api": {
+      "responseFormat": "flat",
+      "dateFormat": "YYYY-MM-DD",
+      "includeSeatQuality": false
     }
   }
 }
-

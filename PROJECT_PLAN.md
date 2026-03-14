@@ -26,20 +26,23 @@ A configurable fake ticket marketplace website designed to test how AI models (l
    - CORS enabled for testing
 
 ### 3. **Configuration System**
-   - JSON-based configuration files
+   - JSON-based configuration with 7 sections
    - Configurable attributes:
-     - **Event data**: Names, descriptions, prices, dates, venues
-     - **Pricing strategies**: Dynamic pricing, fees, discounts
-     - **UI elements**: Button text, labels, messaging
-     - **API response formats**: Structure, field names, data types
-     - **Error messages**: Different error scenarios
-     - **Availability**: Stock levels, sold-out states
+     - **pricing**: Fee visibility mode (4 options), currency, format, fabricated discounts
+     - **scores**: Deal/value scores, flag influence, score contradiction mode
+     - **demand**: View counts, sold data, price trend, urgency language intensity (4 levels)
+     - **seller**: Seller details, refund policy, transfer method, trust signal level
+     - **content**: Description detail level, venue info, bundle options, button text
+     - **api**: Response format, date format, default sort, seat quality gating
+     - **behavior**: Latency simulation, error injection, cart expiration (Phase 2)
+   - Auto-migration from the previous 3-section schema (ui/api/content)
 
 ### 4. **Admin/Control Panel**
    - Web interface to modify configurations
    - Real-time updates without restart
    - Preset configurations for different test scenarios
    - Export/import configurations
+   - A/B experiment management (create experiments, assign variants, view results)
 
 ## Key Features for AI Testing
 
@@ -51,12 +54,12 @@ A configurable fake ticket marketplace website designed to test how AI models (l
 
 2. **Pricing Information**
    - Price display formats ($50.00 vs $50 vs 50 USD)
-   - Hidden fees vs transparent pricing
-   - Dynamic pricing messages
+   - Fee visibility modes (hidden, total only, itemized breakdown, included in price)
+   - Fabricated "was" prices to test AI anchoring on fake discounts
 
-3. **Availability Indicators**
-   - Stock counts ("Only 3 left!")
-   - Urgency messaging ("Selling fast!")
+3. **Demand and Urgency Signals**
+   - Urgency language at four intensity levels (none through aggressive)
+   - Granular demand indicators: view counts, sold data, price trend, demand level
    - Sold-out states
 
 4. **Event Information**
@@ -129,21 +132,54 @@ A configurable fake ticket marketplace website designed to test how AI models (l
 ## Example Configuration Structure
 ```json
 {
-  "ui": {
-    "priceFormat": "currency_symbol",
-    "dateFormat": "MM/DD/YYYY",
-    "urgencyMessages": true,
-    "stockCounts": true
+  "pricing": {
+    "format": "currency_symbol",
+    "currency": "USD",
+    "feeVisibility": "breakdown",
+    "showOriginalPrice": false,
+    "fabricatedDiscount": false
   },
-  "api": {
-    "responseFormat": "nested",
-    "includeFees": true,
-    "priceField": "price"
+  "scores": {
+    "includeDealScore": true,
+    "includeValueScore": true,
+    "includeDealFlags": true,
+    "dealFlagsInfluenceScore": false,
+    "includeSavings": true,
+    "includeRelativeValue": true,
+    "scoreContradictions": false
+  },
+  "demand": {
+    "includeViewCounts": true,
+    "includeSoldData": true,
+    "includePriceTrend": true,
+    "includeDemandLevel": true,
+    "urgencyLanguage": "subtle",
+    "includePriceHistory": false
+  },
+  "seller": {
+    "includeSellerDetails": true,
+    "includeRefundPolicy": true,
+    "includeTransferMethod": true,
+    "trustSignals": "standard"
   },
   "content": {
     "eventDescriptions": "detailed",
     "venueInfo": "full",
+    "includeBundleOptions": false,
+    "includePremiumFeatures": false,
     "buttonText": "Buy Now"
+  },
+  "api": {
+    "responseFormat": "nested",
+    "dateFormat": "MM/DD/YYYY",
+    "defaultSort": "deal_score",
+    "includeSeatQuality": true
+  },
+  "behavior": {
+    "latencyMs": 0,
+    "errorRate": 0,
+    "crossEndpointConsistency": true,
+    "cartExpirationSeconds": 900
   }
 }
 ```

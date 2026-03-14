@@ -39,9 +39,12 @@ frontend/
     listings/[id]/      # Resale listing detail + purchase
     cart/               # Shopping cart + checkout
     admin/              # Admin config panel
+      experiments/      # Experiment list + creation
+        [id]/           # Experiment detail + results
   lib/api.ts            # API URL configuration
 backend/
   server.js             # Express server (all routes, data, logic)
+  experiments.js        # Experiment CRUD, assignment, results
 config/
   scenarios/            # 10 preset test scenarios (JSON)
   active.json           # Current config (gitignored)
@@ -65,7 +68,10 @@ config/
 - `GET /api/listings/:id` — single listing
 - `GET /api/config` / `POST /api/config` — read/write configuration
 - `GET /api/scenarios` / `POST /api/scenarios/load` — preset scenarios
-- `GET /api/cart` / `POST /api/cart` / `DELETE /api/cart/:id` — cart ops
+- `GET /api/cart` / `POST /api/cart` / `DELETE /api/cart/:id` — session-scoped cart ops
+- `GET /api/experiments` / `POST /api/experiments` — list/create experiments
+- `GET /api/experiments/:id` / `PATCH /api/experiments/:id` / `DELETE /api/experiments/:id` — manage experiment
+- `GET /api/experiments/:id/results` — experiment results
 - `GET /health` — health check
 
 ## Deployment

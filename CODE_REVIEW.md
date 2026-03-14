@@ -22,9 +22,15 @@ All endpoints are properly implemented:
 - ✅ `PUT /api/listings/:id/image` - Update listing image
 - ✅ `PUT /api/listings/:id/notes` - Update listing notes
 - ✅ `GET /api/search` - Search events
-- ✅ `GET /api/cart` - Get cart contents
+- ✅ `GET /api/cart` - Get session-scoped cart contents
 - ✅ `POST /api/cart` - Add to cart
 - ✅ `DELETE /api/cart/:listingId` - Remove from cart
+- ✅ `GET /api/experiments` - List experiments
+- ✅ `POST /api/experiments` - Create experiment
+- ✅ `GET /api/experiments/:id` - Experiment detail
+- ✅ `PATCH /api/experiments/:id` - Update experiment
+- ✅ `DELETE /api/experiments/:id` - Delete experiment
+- ✅ `GET /api/experiments/:id/results` - Experiment results
 
 ### Data Models
 - ✅ Events: No pricing/availability (correct)
@@ -82,11 +88,19 @@ All endpoints are properly implemented:
 - ✅ **Notes management** with comma-separated input
 - ✅ Real-time updates
 
+#### Experiments (`/admin/experiments`)
+- ✅ Experiment list with creation form
+- ✅ Experiment detail with per-section config overrides
+- ✅ Results view per experiment
+
 ### Configuration System
-- ✅ Properly loads and saves config
-- ✅ Applies to events (date format, venue info, descriptions)
-- ✅ Applies to listings (price format, fees, response format)
+- ✅ Properly loads and saves config (7-section schema: pricing, scores, demand, seller, content, api, behavior)
+- ✅ Auto-migrates configs from the old 3-section schema (ui/api/content) on load
+- ✅ Applies to events (api.dateFormat, content.venueInfo, content.eventDescriptions)
+- ✅ Applies to listings (pricing.format, pricing.feeVisibility, api.responseFormat, demand.urgencyLanguage)
 - ✅ Deal score calculation uses event listings for comparison
+- ✅ scores.scoreContradictions inverts deal scores when enabled
+- ✅ scores.dealFlagsInfluenceScore gates flag-to-score signal leakage
 
 ### Deal Score System
 - ✅ Calculates score 1-10 based on price comparison
@@ -132,7 +146,9 @@ The codebase is **working as expected**. All major features are implemented:
 - ✅ Deal scores with color coding
 - ✅ Listing images with admin management
 - ✅ Notes as pills with comma-separated admin input
-- ✅ Configuration system
+- ✅ 7-section configuration system with auto-migration from old schema
+- ✅ A/B experiment system (CRUD, assignment, results)
+- ✅ Session-scoped carts
 - ✅ All API endpoints functional
 
 The only issue found (notes data) has been fixed. The application is ready for use.

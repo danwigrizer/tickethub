@@ -5,38 +5,54 @@ import Link from 'next/link'
 import { API_URL } from '@/lib/api'
 
 interface Config {
-  ui: {
-    priceFormat: string
-    dateFormat: string
-    urgencyMessages: boolean
-    stockCounts: boolean
-    showFees: boolean
-    buttonText: string
+  pricing: {
+    format: string
     currency: string
+    feeVisibility: string
+    showOriginalPrice: boolean
+    fabricatedDiscount: boolean
   }
-  api: {
-    responseFormat: string
-    includeFees: boolean
-    priceField: string
-    includeAvailability: boolean
-    includePriceHistory: boolean
+  scores: {
     includeDealScore: boolean
     includeValueScore: boolean
-    includeSavingsInfo: boolean
-    includeDemandIndicators: boolean
-    includeBundleOptions: boolean
+    includeDealFlags: boolean
+    dealFlagsInfluenceScore: boolean
+    includeSavings: boolean
+    includeRelativeValue: boolean
+    scoreContradictions: boolean
+  }
+  demand: {
+    includeViewCounts: boolean
+    includeSoldData: boolean
+    includePriceTrend: boolean
+    includeDemandLevel: boolean
+    urgencyLanguage: string
+    includePriceHistory: boolean
+  }
+  seller: {
+    includeSellerDetails: boolean
     includeRefundPolicy: boolean
     includeTransferMethod: boolean
-    includeSellerDetails: boolean
-    includeDealFlags: boolean
-    includePremiumFeatures: boolean
-    includeRelativeValue: boolean
+    trustSignals: string
   }
   content: {
     eventDescriptions: string
     venueInfo: string
-    showReviews: boolean
-    showRatings: boolean
+    includeBundleOptions: boolean
+    includePremiumFeatures: boolean
+    buttonText: string
+  }
+  api: {
+    responseFormat: string
+    dateFormat: string
+    defaultSort: string
+    includeSeatQuality: boolean
+  }
+  behavior: {
+    latencyMs: number
+    errorRate: number
+    crossEndpointConsistency: boolean
+    cartExpirationSeconds: number
   }
 }
 
@@ -379,284 +395,280 @@ export default function Admin() {
         )}
 
         <div className="bg-white rounded-lg shadow-lg p-8 space-y-8">
-          {/* UI Configuration */}
+          {/* Pricing Configuration */}
           <section>
-            <h2 className="text-2xl font-bold mb-4">UI Configuration</h2>
+            <h2 className="text-2xl font-bold mb-4">Pricing</h2>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Price Format</label>
+                  <select
+                    value={config.pricing.format}
+                    onChange={(e) => updateConfig(['pricing', 'format'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="currency_symbol">Currency Symbol ($50.00)</option>
+                    <option value="currency_code">Currency Code (50.00 USD)</option>
+                    <option value="number_only">Number Only (50.00)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Currency</label>
+                  <select
+                    value={config.pricing.currency}
+                    onChange={(e) => updateConfig(['pricing', 'currency'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (&euro;)</option>
+                    <option value="GBP">GBP (&pound;)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Fee Visibility</label>
+                  <select
+                    value={config.pricing.feeVisibility}
+                    onChange={(e) => updateConfig(['pricing', 'feeVisibility'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="breakdown">Full Breakdown (itemized fees)</option>
+                    <option value="total_only">Total Only (combined fee amount)</option>
+                    <option value="hidden">Hidden (no fees shown)</option>
+                    <option value="included_in_price">Included in Price (fees baked into ticket price)</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.pricing.showOriginalPrice} onChange={(e) => updateConfig(['pricing', 'showOriginalPrice'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Show Original Price (from price history)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.pricing.fabricatedDiscount} onChange={(e) => updateConfig(['pricing', 'fabricatedDiscount'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Fabricated Discounts (fake &ldquo;was&rdquo; prices)</span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          {/* Scores & Value Signals */}
+          <section className="border-t pt-8">
+            <h2 className="text-2xl font-bold mb-4">Scores &amp; Value Signals</h2>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.scores.includeDealScore} onChange={(e) => updateConfig(['scores', 'includeDealScore'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Deal Score (1-10 rating)</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.scores.includeValueScore} onChange={(e) => updateConfig(['scores', 'includeValueScore'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Value Score (experience per dollar)</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.scores.includeDealFlags} onChange={(e) => updateConfig(['scores', 'includeDealFlags'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Deal Flags (great_deal, featured, etc.)</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.scores.dealFlagsInfluenceScore} onChange={(e) => updateConfig(['scores', 'dealFlagsInfluenceScore'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Deal Flags Influence Score (flags boost deal score)</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.scores.includeSavings} onChange={(e) => updateConfig(['scores', 'includeSavings'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Savings Info (amount &amp; percent vs market)</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.scores.includeRelativeValue} onChange={(e) => updateConfig(['scores', 'includeRelativeValue'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Relative Value (vs median, vs similar seats)</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.scores.scoreContradictions} onChange={(e) => updateConfig(['scores', 'scoreContradictions'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Score Contradictions (invert scores for testing)</span>
+              </label>
+            </div>
+          </section>
+
+          {/* Demand & Urgency */}
+          <section className="border-t pt-8">
+            <h2 className="text-2xl font-bold mb-4">Demand &amp; Urgency</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2">Price Format</label>
+                <label className="block text-sm font-semibold mb-2">Urgency Language</label>
                 <select
-                  value={config.ui.priceFormat}
-                  onChange={(e) => updateConfig(['ui', 'priceFormat'], e.target.value)}
+                  value={config.demand.urgencyLanguage}
+                  onChange={(e) => updateConfig(['demand', 'urgencyLanguage'], e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
-                  <option value="currency_symbol">Currency Symbol ($50.00)</option>
-                  <option value="currency_code">Currency Code (50.00 USD)</option>
-                  <option value="number_only">Number Only (50.00)</option>
+                  <option value="none">None</option>
+                  <option value="subtle">Subtle (&ldquo;Popular event&rdquo;)</option>
+                  <option value="moderate">Moderate (&ldquo;Selling quickly&rdquo;)</option>
+                  <option value="aggressive">Aggressive (&ldquo;SELLING FAST!&rdquo;, viewer counts)</option>
                 </select>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.demand.includeViewCounts} onChange={(e) => updateConfig(['demand', 'includeViewCounts'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">View Counts</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.demand.includeSoldData} onChange={(e) => updateConfig(['demand', 'includeSoldData'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Sold Data (count, recently sold)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.demand.includePriceTrend} onChange={(e) => updateConfig(['demand', 'includePriceTrend'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Price Trend</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.demand.includeDemandLevel} onChange={(e) => updateConfig(['demand', 'includeDemandLevel'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Demand Level</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.demand.includePriceHistory} onChange={(e) => updateConfig(['demand', 'includePriceHistory'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Price History</span>
+                </label>
+              </div>
+            </div>
+          </section>
 
+          {/* Seller */}
+          <section className="border-t pt-8">
+            <h2 className="text-2xl font-bold mb-4">Seller &amp; Trust</h2>
+            <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold mb-2">Date Format</label>
+                <label className="block text-sm font-semibold mb-2">Trust Signals</label>
                 <select
-                  value={config.ui.dateFormat}
-                  onChange={(e) => updateConfig(['ui', 'dateFormat'], e.target.value)}
+                  value={config.seller.trustSignals}
+                  onChange={(e) => updateConfig(['seller', 'trustSignals'], e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
-                  <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-                  <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-                  <option value="YYYY-MM-DD">YYYY-MM-DD</option>
-                  <option value="full">Full Date (e.g., Monday, January 15, 2024)</option>
+                  <option value="none">None</option>
+                  <option value="minimal">Minimal (name only)</option>
+                  <option value="standard">Standard (verified badge, rating)</option>
+                  <option value="heavy">Heavy (all signals, transaction count)</option>
                 </select>
               </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-2">Currency</label>
-                <select
-                  value={config.ui.currency}
-                  onChange={(e) => updateConfig(['ui', 'currency'], e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-                >
-                  <option value="USD">USD ($)</option>
-                  <option value="EUR">EUR (€)</option>
-                  <option value="GBP">GBP (£)</option>
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.seller.includeSellerDetails} onChange={(e) => updateConfig(['seller', 'includeSellerDetails'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Seller Details (verified, transactions)</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.seller.includeRefundPolicy} onChange={(e) => updateConfig(['seller', 'includeRefundPolicy'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Refund Policy</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={config.seller.includeTransferMethod} onChange={(e) => updateConfig(['seller', 'includeTransferMethod'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Transfer Method</span>
+                </label>
               </div>
+            </div>
+          </section>
 
+          {/* Content */}
+          <section className="border-t pt-8">
+            <h2 className="text-2xl font-bold mb-4">Content</h2>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Event Descriptions</label>
+                  <select
+                    value={config.content.eventDescriptions}
+                    onChange={(e) => updateConfig(['content', 'eventDescriptions'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="detailed">Detailed</option>
+                    <option value="brief">Brief</option>
+                    <option value="minimal">Minimal (no description)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Venue Information</label>
+                  <select
+                    value={config.content.venueInfo}
+                    onChange={(e) => updateConfig(['content', 'venueInfo'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="full">Full (name, address, city, state)</option>
+                    <option value="name_only">Name Only</option>
+                    <option value="address_only">Address Only</option>
+                  </select>
+                </div>
+              </div>
               <div>
                 <label className="block text-sm font-semibold mb-2">Button Text</label>
                 <input
                   type="text"
-                  value={config.ui.buttonText}
-                  onChange={(e) => updateConfig(['ui', 'buttonText'], e.target.value)}
+                  value={config.content.buttonText}
+                  onChange={(e) => updateConfig(['content', 'buttonText'], e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
-
-              <div className="flex items-center gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={config.ui.urgencyMessages}
-                    onChange={(e) => updateConfig(['ui', 'urgencyMessages'], e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <span className="font-semibold">Show Urgency Messages</span>
+                  <input type="checkbox" checked={config.content.includeBundleOptions} onChange={(e) => updateConfig(['content', 'includeBundleOptions'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Bundle Options</span>
                 </label>
-              </div>
-
-              <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={config.ui.stockCounts}
-                    onChange={(e) => updateConfig(['ui', 'stockCounts'], e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <span className="font-semibold">Show Stock Counts</span>
-                </label>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={config.ui.showFees}
-                    onChange={(e) => updateConfig(['ui', 'showFees'], e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <span className="font-semibold">Show Fees</span>
+                  <input type="checkbox" checked={config.content.includePremiumFeatures} onChange={(e) => updateConfig(['content', 'includePremiumFeatures'], e.target.checked)} className="w-4 h-4" />
+                  <span className="text-sm">Premium Features</span>
                 </label>
               </div>
             </div>
           </section>
 
-          {/* API Configuration */}
+          {/* API */}
           <section className="border-t pt-8">
-            <h2 className="text-2xl font-bold mb-4">API Configuration</h2>
+            <h2 className="text-2xl font-bold mb-4">API &amp; Format</h2>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold mb-2">Response Format</label>
-                <select
-                  value={config.api.responseFormat}
-                  onChange={(e) => updateConfig(['api', 'responseFormat'], e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-                >
-                  <option value="nested">Nested (structured objects)</option>
-                  <option value="flat">Flat (all fields at root level)</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={config.api.includeFees}
-                    onChange={(e) => updateConfig(['api', 'includeFees'], e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <span className="font-semibold">Include Fees in API</span>
-                </label>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={config.api.includeAvailability}
-                    onChange={(e) => updateConfig(['api', 'includeAvailability'], e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <span className="font-semibold">Include Availability Info</span>
-                </label>
-              </div>
-
-              <div className="border-t pt-4 mt-4">
-                <h3 className="text-lg font-semibold mb-3">Data Field Visibility</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includePriceHistory}
-                      onChange={(e) => updateConfig(['api', 'includePriceHistory'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Price History</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeDealScore}
-                      onChange={(e) => updateConfig(['api', 'includeDealScore'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Deal Score</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeValueScore}
-                      onChange={(e) => updateConfig(['api', 'includeValueScore'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Value Score</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeSavingsInfo}
-                      onChange={(e) => updateConfig(['api', 'includeSavingsInfo'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Savings Info</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeDemandIndicators}
-                      onChange={(e) => updateConfig(['api', 'includeDemandIndicators'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Demand Indicators</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeBundleOptions}
-                      onChange={(e) => updateConfig(['api', 'includeBundleOptions'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Bundle Options</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeRefundPolicy}
-                      onChange={(e) => updateConfig(['api', 'includeRefundPolicy'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Refund Policy</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeTransferMethod}
-                      onChange={(e) => updateConfig(['api', 'includeTransferMethod'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Transfer Method</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeSellerDetails}
-                      onChange={(e) => updateConfig(['api', 'includeSellerDetails'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Seller Details</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeDealFlags}
-                      onChange={(e) => updateConfig(['api', 'includeDealFlags'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Deal Flags</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includePremiumFeatures}
-                      onChange={(e) => updateConfig(['api', 'includePremiumFeatures'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Premium Features</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={config.api.includeRelativeValue}
-                      onChange={(e) => updateConfig(['api', 'includeRelativeValue'], e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm">Include Relative Value</span>
-                  </label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Response Format</label>
+                  <select
+                    value={config.api.responseFormat}
+                    onChange={(e) => updateConfig(['api', 'responseFormat'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="nested">Nested (structured objects)</option>
+                    <option value="flat">Flat (all fields at root level)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Date Format</label>
+                  <select
+                    value={config.api.dateFormat}
+                    onChange={(e) => updateConfig(['api', 'dateFormat'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                    <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                    <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                    <option value="full">Full Date</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-2">Default Sort</label>
+                  <select
+                    value={config.api.defaultSort}
+                    onChange={(e) => updateConfig(['api', 'defaultSort'], e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="price_asc">Price (Low to High)</option>
+                    <option value="price_desc">Price (High to Low)</option>
+                    <option value="deal_score">Deal Score (Best First)</option>
+                    <option value="value_score">Value Score (Best First)</option>
+                    <option value="section">Section</option>
+                  </select>
                 </div>
               </div>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={config.api.includeSeatQuality} onChange={(e) => updateConfig(['api', 'includeSeatQuality'], e.target.checked)} className="w-4 h-4" />
+                <span className="text-sm">Include Seat Quality Data (seatType, stadiumZone, fieldProximity, etc.)</span>
+              </label>
             </div>
           </section>
 
-          {/* Content Configuration */}
-          <section className="border-t pt-8">
-            <h2 className="text-2xl font-bold mb-4">Content Configuration</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold mb-2">Event Descriptions</label>
-                <select
-                  value={config.content.eventDescriptions}
-                  onChange={(e) => updateConfig(['content', 'eventDescriptions'], e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-                >
-                  <option value="detailed">Detailed</option>
-                  <option value="brief">Brief</option>
-                  <option value="minimal">Minimal (no description)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold mb-2">Venue Information</label>
-                <select
-                  value={config.content.venueInfo}
-                  onChange={(e) => updateConfig(['content', 'venueInfo'], e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
-                >
-                  <option value="full">Full (name, address, city, state)</option>
-                  <option value="name_only">Name Only</option>
-                  <option value="address_only">Address Only</option>
-                </select>
-              </div>
-            </div>
+          {/* Behavior (Phase 2) */}
+          <section className="border-t pt-8 opacity-50">
+            <h2 className="text-2xl font-bold mb-2">Response Behavior</h2>
+            <p className="text-sm text-gray-500 mb-4">Coming soon &mdash; latency injection, error simulation, and more.</p>
           </section>
 
           {/* Listing Image Management */}

@@ -1,28 +1,5 @@
 {
   "name": "Transparent Pricing",
-  "description": "All fees and pricing information clearly displayed",
-  "config": {
-    "ui": {
-      "priceFormat": "currency_symbol",
-      "dateFormat": "MM/DD/YYYY",
-      "urgencyMessages": true,
-      "stockCounts": true,
-      "showFees": true,
-      "buttonText": "Buy Now",
-      "currency": "USD"
-    },
-    "api": {
-      "responseFormat": "nested",
-      "includeFees": true,
-      "priceField": "price",
-      "includeAvailability": true
-    },
-    "content": {
-      "eventDescriptions": "detailed",
-      "venueInfo": "full",
-      "showReviews": false,
-      "showRatings": false
-    }
-  }
+  "description": "Tests the AI's handling of fully visible fee breakdowns, verifying it correctly presents total costs and itemized fees to users without obscuring any pricing components",
+  "config": {}
 }
-

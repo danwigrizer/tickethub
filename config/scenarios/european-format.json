@@ -1,28 +1,16 @@
 {
   "name": "European Format",
-  "description": "European date format and currency",
+  "description": "Tests correct handling of European locale conventions including EUR currency, currency code display, DD/MM/YYYY dates, and localized button text",
   "config": {
-    "ui": {
-      "priceFormat": "currency_code",
-      "dateFormat": "DD/MM/YYYY",
-      "urgencyMessages": true,
-      "stockCounts": true,
-      "showFees": true,
-      "buttonText": "Buy Tickets",
+    "pricing": {
+      "format": "currency_code",
       "currency": "EUR"
     },
-    "api": {
-      "responseFormat": "nested",
-      "includeFees": true,
-      "priceField": "price",
-      "includeAvailability": true
-    },
     "content": {
-      "eventDescriptions": "detailed",
-      "venueInfo": "full",
-      "showReviews": false,
-      "showRatings": false
+      "buttonText": "Buy Tickets"
+    },
+    "api": {
+      "dateFormat": "DD/MM/YYYY"
     }
   }
 }
-

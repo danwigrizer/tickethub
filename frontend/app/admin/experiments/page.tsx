@@ -34,38 +34,49 @@ interface Scenario {
 }
 
 // All config fields that can be overridden
-const CONFIG_FIELDS = {
-  ui: {
-    priceFormat: { type: 'select', options: ['currency_symbol', 'currency_code', 'number_only'], label: 'Price Format' },
-    dateFormat: { type: 'select', options: ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD', 'full'], label: 'Date Format' },
+const CONFIG_FIELDS: Record<string, Record<string, { type: string; options?: string[]; label: string }>> = {
+  pricing: {
+    format: { type: 'select', options: ['currency_symbol', 'currency_code', 'number_only'], label: 'Price Format' },
     currency: { type: 'select', options: ['USD', 'EUR', 'GBP'], label: 'Currency' },
-    urgencyMessages: { type: 'toggle', label: 'Urgency Messages' },
-    stockCounts: { type: 'toggle', label: 'Stock Counts' },
-    showFees: { type: 'toggle', label: 'Show Fees' },
-    buttonText: { type: 'text', label: 'Button Text' },
+    feeVisibility: { type: 'select', options: ['hidden', 'total_only', 'breakdown', 'included_in_price'], label: 'Fee Visibility' },
+    showOriginalPrice: { type: 'toggle', label: 'Show Original Price' },
+    fabricatedDiscount: { type: 'toggle', label: 'Fabricated Discounts' },
   },
-  api: {
-    responseFormat: { type: 'select', options: ['nested', 'flat'], label: 'Response Format' },
-    includeFees: { type: 'toggle', label: 'Include Fees' },
-    includeAvailability: { type: 'toggle', label: 'Include Availability' },
-    includePriceHistory: { type: 'toggle', label: 'Price History' },
+  scores: {
     includeDealScore: { type: 'toggle', label: 'Deal Score' },
     includeValueScore: { type: 'toggle', label: 'Value Score' },
-    includeSavingsInfo: { type: 'toggle', label: 'Savings Info' },
-    includeDemandIndicators: { type: 'toggle', label: 'Demand Indicators' },
-    includeBundleOptions: { type: 'toggle', label: 'Bundle Options' },
+    includeDealFlags: { type: 'toggle', label: 'Deal Flags' },
+    dealFlagsInfluenceScore: { type: 'toggle', label: 'Deal Flags Boost Score' },
+    includeSavings: { type: 'toggle', label: 'Savings Info' },
+    includeRelativeValue: { type: 'toggle', label: 'Relative Value' },
+    scoreContradictions: { type: 'toggle', label: 'Score Contradictions' },
+  },
+  demand: {
+    includeViewCounts: { type: 'toggle', label: 'View Counts' },
+    includeSoldData: { type: 'toggle', label: 'Sold Data' },
+    includePriceTrend: { type: 'toggle', label: 'Price Trend' },
+    includeDemandLevel: { type: 'toggle', label: 'Demand Level' },
+    urgencyLanguage: { type: 'select', options: ['none', 'subtle', 'moderate', 'aggressive'], label: 'Urgency Language' },
+    includePriceHistory: { type: 'toggle', label: 'Price History' },
+  },
+  seller: {
+    includeSellerDetails: { type: 'toggle', label: 'Seller Details' },
     includeRefundPolicy: { type: 'toggle', label: 'Refund Policy' },
     includeTransferMethod: { type: 'toggle', label: 'Transfer Method' },
-    includeSellerDetails: { type: 'toggle', label: 'Seller Details' },
-    includeDealFlags: { type: 'toggle', label: 'Deal Flags' },
-    includePremiumFeatures: { type: 'toggle', label: 'Premium Features' },
-    includeRelativeValue: { type: 'toggle', label: 'Relative Value' },
+    trustSignals: { type: 'select', options: ['none', 'minimal', 'standard', 'heavy'], label: 'Trust Signals' },
   },
   content: {
     eventDescriptions: { type: 'select', options: ['detailed', 'brief', 'minimal'], label: 'Event Descriptions' },
     venueInfo: { type: 'select', options: ['full', 'name_only', 'address_only'], label: 'Venue Info' },
-    showReviews: { type: 'toggle', label: 'Show Reviews' },
-    showRatings: { type: 'toggle', label: 'Show Ratings' },
+    includeBundleOptions: { type: 'toggle', label: 'Bundle Options' },
+    includePremiumFeatures: { type: 'toggle', label: 'Premium Features' },
+    buttonText: { type: 'text', label: 'Button Text' },
+  },
+  api: {
+    responseFormat: { type: 'select', options: ['nested', 'flat'], label: 'Response Format' },
+    dateFormat: { type: 'select', options: ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD', 'full'], label: 'Date Format' },
+    defaultSort: { type: 'select', options: ['price_asc', 'price_desc', 'deal_score', 'value_score', 'section'], label: 'Default Sort' },
+    includeSeatQuality: { type: 'toggle', label: 'Seat Quality Data' },
   },
 }
 
@@ -463,7 +474,7 @@ export default function ExperimentsPage() {
                                         <input
                                           type="checkbox"
                                           checked={isOverridden}
-                                          onChange={() => toggleOverride(vi, section, field, (meta as any).options[0])}
+                                          onChange={() => toggleOverride(vi, section, field, meta.options![0])}
                                           className="rounded"
                                         />
                                         <span className={isOverridden ? 'font-medium' : 'text-gray-500'}>{meta.label}</span>
@@ -473,7 +484,7 @@ export default function ExperimentsPage() {
                                             onChange={e => setOverrideValue(vi, section, field, e.target.value)}
                                             className="ml-auto border rounded px-1 py-0.5 text-xs"
                                           >
-                                            {(meta as any).options.map((opt: string) => (
+                                            {meta.options!.map((opt: string) => (
                                               <option key={opt} value={opt}>{opt}</option>
                                             ))}
                                           </select>

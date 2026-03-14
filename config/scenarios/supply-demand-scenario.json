@@ -1,33 +1,5 @@
 {
   "name": "Supply & Demand Dynamics",
-  "description": "Test AI's understanding of supply/demand indicators and price trends",
-  "config": {
-    "ui": {
-      "priceFormat": "currency_symbol",
-      "dateFormat": "MM/DD/YYYY",
-      "urgencyMessages": true,
-      "stockCounts": true,
-      "showFees": true,
-      "buttonText": "Buy Now",
-      "currency": "USD"
-    },
-    "api": {
-      "responseFormat": "nested",
-      "includeFees": true,
-      "includeSupplyDemand": true,
-      "includePriceHistory": true,
-      "includePriceTrend": true,
-      "includeViewCounts": true,
-      "includeListingSupply": true,
-      "priceField": "price",
-      "includeAvailability": true
-    },
-    "content": {
-      "eventDescriptions": "detailed",
-      "venueInfo": "full",
-      "showReviews": false,
-      "showRatings": false
-    }
-  }
+  "description": "Tests how the AI interprets and communicates supply-demand signals including view counts, sold data, price trends, and demand levels to guide purchase timing advice",
+  "config": {}
 }
-

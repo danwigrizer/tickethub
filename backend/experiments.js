@@ -8,6 +8,8 @@ const router = Router();
 let sessions = null;
 let requestLogs = null;
 let loadConfig = null;
+let migrateConfig = null;
+let migrateOverrides = null;
 let logsDir = null;
 let configDir = null;
 
@@ -26,6 +28,15 @@ function loadExperiments() {
     try {
       const data = JSON.parse(readFileSync(experimentsFile, 'utf8'));
       for (const exp of data) {
+        // Migrate old-schema baseConfig if needed
+        if (exp.baseConfig && exp.baseConfig.ui) {
+          exp.baseConfig = migrateConfig(exp.baseConfig);
+        }
+        for (const variant of (exp.variants || [])) {
+          if (variant.overrides && (variant.overrides.ui || variant.overrides.api?.includeFees !== undefined)) {
+            variant.overrides = migrateOverrides(variant.overrides);
+          }
+        }
         experiments.set(exp.id, exp);
       }
     } catch (error) {
@@ -109,9 +120,13 @@ export function resolveExperimentConfig(sessionId) {
 
   // Merge base config + variant overrides (per-section shallow merge)
   const config = {
-    ui:      { ...activeExperiment.baseConfig.ui,      ...(variant.overrides?.ui || {}) },
-    api:     { ...activeExperiment.baseConfig.api,     ...(variant.overrides?.api || {}) },
-    content: { ...activeExperiment.baseConfig.content, ...(variant.overrides?.content || {}) }
+    pricing:  { ...activeExperiment.baseConfig.pricing,  ...(variant.overrides?.pricing || {}) },
+    scores:   { ...activeExperiment.baseConfig.scores,   ...(variant.overrides?.scores || {}) },
+    demand:   { ...activeExperiment.baseConfig.demand,   ...(variant.overrides?.demand || {}) },
+    seller:   { ...activeExperiment.baseConfig.seller,   ...(variant.overrides?.seller || {}) },
+    content:  { ...activeExperiment.baseConfig.content,  ...(variant.overrides?.content || {}) },
+    api:      { ...activeExperiment.baseConfig.api,      ...(variant.overrides?.api || {}) },
+    behavior: { ...activeExperiment.baseConfig.behavior, ...(variant.overrides?.behavior || {}) },
   };
 
   return { config, experimentId: activeExperiment.id, variantId };
@@ -285,10 +300,18 @@ router.post('/api/experiments/:id/start', (req, res) => {
     }
     // Merge scenario with defaults (same pattern as loadConfig)
     const DEFAULT_CONFIG = loadConfig(); // get defaults as base
+    // Migrate scenario config if it uses old schema
+    const sc = (scenarioConfig.ui || (!scenarioConfig.pricing && !scenarioConfig.scores))
+      ? migrateConfig(scenarioConfig)
+      : scenarioConfig;
     exp.baseConfig = {
-      ui:      { ...DEFAULT_CONFIG.ui,      ...(scenarioConfig.ui || {}) },
-      api:     { ...DEFAULT_CONFIG.api,     ...(scenarioConfig.api || {}) },
-      content: { ...DEFAULT_CONFIG.content, ...(scenarioConfig.content || {}) }
+      pricing:  { ...DEFAULT_CONFIG.pricing,  ...(sc.pricing || {}) },
+      scores:   { ...DEFAULT_CONFIG.scores,   ...(sc.scores || {}) },
+      demand:   { ...DEFAULT_CONFIG.demand,   ...(sc.demand || {}) },
+      seller:   { ...DEFAULT_CONFIG.seller,   ...(sc.seller || {}) },
+      content:  { ...DEFAULT_CONFIG.content,  ...(sc.content || {}) },
+      api:      { ...DEFAULT_CONFIG.api,      ...(sc.api || {}) },
+      behavior: { ...DEFAULT_CONFIG.behavior, ...(sc.behavior || {}) },
     };
   }
 
@@ -472,10 +495,12 @@ router.get('/api/experiments/:id/export', (req, res) => {
 
 // ========== Init ==========
 
-export function initExperiments({ sessions: s, requestLogs: r, loadConfig: lc, logsDir: ld, configDir: cd }) {
+export function initExperiments({ sessions: s, requestLogs: r, loadConfig: lc, migrateConfig: mc, migrateOverrides: mo, logsDir: ld, configDir: cd }) {
   sessions = s;
   requestLogs = r;
   loadConfig = lc;
+  migrateConfig = mc;
+  migrateOverrides = mo;
   logsDir = ld;
   configDir = cd;
   experimentsFile = join(ld, 'experiments.json');
