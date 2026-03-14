@@ -595,8 +595,9 @@ function loadConfig() {
     try {
       const data = readFileSync(CONFIG_PATH, 'utf8');
       const savedConfig = JSON.parse(data);
-      // Detect old schema and migrate
-      if (savedConfig.ui) {
+      // Detect old schema and migrate — trigger on old ui section OR missing all new sections
+      const hasNewSchema = savedConfig.pricing || savedConfig.scores || savedConfig.demand || savedConfig.seller;
+      if (savedConfig.ui || !hasNewSchema) {
         const migrated = migrateConfig(savedConfig);
         saveConfig(migrated);
         return migrated;

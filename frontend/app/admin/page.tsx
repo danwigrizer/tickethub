@@ -56,6 +56,28 @@ interface Config {
   }
 }
 
+const DEFAULT_CONFIG: Config = {
+  pricing: { format: 'currency_symbol', currency: 'USD', feeVisibility: 'breakdown', showOriginalPrice: false, fabricatedDiscount: false },
+  scores: { includeDealScore: true, includeValueScore: true, includeDealFlags: true, dealFlagsInfluenceScore: true, includeSavings: true, includeRelativeValue: true, scoreContradictions: false },
+  demand: { includeViewCounts: true, includeSoldData: true, includePriceTrend: true, includeDemandLevel: true, urgencyLanguage: 'moderate', includePriceHistory: true },
+  seller: { includeSellerDetails: true, includeRefundPolicy: true, includeTransferMethod: true, trustSignals: 'standard' },
+  content: { eventDescriptions: 'detailed', venueInfo: 'full', includeBundleOptions: true, includePremiumFeatures: true, buttonText: 'Buy Now' },
+  api: { responseFormat: 'nested', dateFormat: 'MM/DD/YYYY', defaultSort: 'price_asc', includeSeatQuality: true },
+  behavior: { latencyMs: 0, errorRate: 0, crossEndpointConsistency: true, cartExpirationSeconds: 0 },
+}
+
+function mergeConfig(data: any): Config {
+  return {
+    pricing:  { ...DEFAULT_CONFIG.pricing,  ...(data?.pricing || {}) },
+    scores:   { ...DEFAULT_CONFIG.scores,   ...(data?.scores || {}) },
+    demand:   { ...DEFAULT_CONFIG.demand,   ...(data?.demand || {}) },
+    seller:   { ...DEFAULT_CONFIG.seller,   ...(data?.seller || {}) },
+    content:  { ...DEFAULT_CONFIG.content,  ...(data?.content || {}) },
+    api:      { ...DEFAULT_CONFIG.api,      ...(data?.api || {}) },
+    behavior: { ...DEFAULT_CONFIG.behavior, ...(data?.behavior || {}) },
+  }
+}
+
 interface Scenario {
   name: string
   description: string
@@ -139,8 +161,9 @@ export default function Admin() {
   const fetchActiveExperiment = async () => {
     try {
       const res = await fetch(`${API_URL}/experiments?status=running`)
+      if (!res.ok) return
       const data = await res.json()
-      if (data.length > 0) setActiveExperiment({ id: data[0].id, name: data[0].name })
+      if (Array.isArray(data) && data.length > 0) setActiveExperiment({ id: data[0].id, name: data[0].name })
     } catch {}
   }
 
@@ -221,7 +244,7 @@ export default function Admin() {
     try {
       const response = await fetch(`${API_URL}/config`)
       const data = await response.json()
-      setConfig(data)
+      setConfig(mergeConfig(data))
       setLoading(false)
     } catch (error) {
       console.error('Error fetching config:', error)
@@ -273,7 +296,7 @@ export default function Admin() {
       })
       if (response.ok) {
         const data = await response.json()
-        setConfig(data)
+        setConfig(mergeConfig(data))
         setMessage(`Scenario "${scenarioName}" loaded successfully!`)
         setTimeout(() => setMessage(''), 3000)
       } else {
