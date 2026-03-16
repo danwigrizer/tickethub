@@ -1,9 +1,10 @@
-import { API_URL } from '@/lib/api'
+import { getServerApiUrl } from '@/lib/api'
 import ListingDetail from './ListingClient'
 
 async function getListing(id: string) {
   try {
-    const res = await fetch(`${API_URL}/listings/${id}`, { cache: 'no-store' })
+    const apiUrl = getServerApiUrl()
+    const res = await fetch(`${apiUrl}/listings/${id}`, { cache: 'no-store' })
     if (!res.ok) return null
     return await res.json()
   } catch {

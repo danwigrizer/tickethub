@@ -1,9 +1,10 @@
-import { API_URL } from '@/lib/api'
+import { getServerApiUrl } from '@/lib/api'
 import EventPage from './EventClient'
 
 async function getEvent(id: string) {
   try {
-    const res = await fetch(`${API_URL}/events/${id}`, { cache: 'no-store' })
+    const apiUrl = getServerApiUrl()
+    const res = await fetch(`${apiUrl}/events/${id}`, { cache: 'no-store' })
     if (!res.ok) return null
     return await res.json()
   } catch {
@@ -13,7 +14,8 @@ async function getEvent(id: string) {
 
 async function getListings(id: string) {
   try {
-    const res = await fetch(`${API_URL}/events/${id}/listings`, { cache: 'no-store' })
+    const apiUrl = getServerApiUrl()
+    const res = await fetch(`${apiUrl}/events/${id}/listings`, { cache: 'no-store' })
     if (!res.ok) return []
     return await res.json()
   } catch {
