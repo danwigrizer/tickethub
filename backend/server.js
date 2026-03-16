@@ -726,13 +726,20 @@ function loadVenueData(venueName) {
   }
 }
 
+// Generate future dates relative to today so events never appear stale
+function futureDateString(daysFromNow) {
+  const d = new Date();
+  d.setDate(d.getDate() + daysFromNow);
+  return d.toISOString().split('T')[0];
+}
+
 // Mock event data (NO prices or availability)
 const mockEvents = [
   {
     id: 1,
     title: 'Taylor Swift: The Eras Tour',
     artist: 'Taylor Swift',
-    date: '2024-06-15',
+    date: futureDateString(14),
     time: '19:00',
     venue: {
       name: 'Madison Square Garden',
@@ -747,7 +754,7 @@ const mockEvents = [
     id: 2,
     title: 'Hamilton - Broadway',
     artist: 'Lin-Manuel Miranda',
-    date: '2024-07-20',
+    date: futureDateString(21),
     time: '20:00',
     venue: {
       name: 'Richard Rodgers Theatre',
@@ -762,7 +769,7 @@ const mockEvents = [
     id: 3,
     title: 'Los Angeles Lakers vs Golden State Warriors',
     artist: 'NBA',
-    date: '2024-08-10',
+    date: futureDateString(7),
     time: '19:30',
     venue: {
       name: 'Crypto.com Arena',
@@ -777,7 +784,7 @@ const mockEvents = [
     id: 4,
     title: 'Ed Sheeran: + - = ÷ x Tour',
     artist: 'Ed Sheeran',
-    date: '2024-09-05',
+    date: futureDateString(30),
     time: '20:00',
     venue: {
       name: 'Wembley Stadium',
@@ -792,7 +799,7 @@ const mockEvents = [
     id: 5,
     title: 'The Phantom of the Opera',
     artist: 'Andrew Lloyd Webber',
-    date: '2024-10-12',
+    date: futureDateString(45),
     time: '19:30',
     venue: {
       name: 'Majestic Theatre',
@@ -807,7 +814,7 @@ const mockEvents = [
     id: 6,
     title: 'Boston Celtics vs Miami Heat',
     artist: 'NBA',
-    date: '2024-11-20',
+    date: futureDateString(10),
     time: '20:00',
     venue: {
       name: 'TD Garden',
