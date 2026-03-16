@@ -1,13 +1,7 @@
 import { Router } from 'express';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { getDB } from './db.js';
 
 const router = Router();
-
-// In-memory store: { [listingId]: { pricePerTicket, fees, ... } }
-let overrides = {};
-let overridesFile = null;
-let mockListings = null;
 
 const OVERRIDEABLE_FIELDS = new Set([
   'pricePerTicket', 'fees', 'serviceFee', 'fulfillmentFee', 'platformFee',
@@ -27,36 +21,40 @@ function sanitizeOverrides(fields) {
   return clean;
 }
 
-// ========== Persistence ==========
+// ========== DB Access with TTL Cache ==========
 
-function loadOverrides() {
-  if (existsSync(overridesFile)) {
-    try {
-      overrides = JSON.parse(readFileSync(overridesFile, 'utf8'));
-    } catch (error) {
-      console.error('Error loading listing overrides:', error);
-      overrides = {};
-    }
+let cachedOverrides = null;
+let cacheTime = 0;
+const CACHE_TTL = 5000;
+
+export async function getGlobalListingOverrides() {
+  if (cachedOverrides && Date.now() - cacheTime < CACHE_TTL) {
+    return cachedOverrides;
   }
+  try {
+    const db = getDB();
+    const doc = await db.collection('listingOverrides').findOne({ key: 'global' });
+    cachedOverrides = doc?.overrides || {};
+  } catch (error) {
+    console.error('Error loading listing overrides from DB:', error);
+    cachedOverrides = cachedOverrides || {};
+  }
+  cacheTime = Date.now();
+  return cachedOverrides;
 }
 
-let persistTimer = null;
-function persistOverrides() {
-  if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
-    try {
-      writeFileSync(overridesFile, JSON.stringify(overrides, null, 2));
-    } catch (error) {
-      console.error('Error persisting listing overrides:', error);
-    }
-  }, 2000);
+async function saveOverrides(overrides) {
+  const db = getDB();
+  await db.collection('listingOverrides').updateOne(
+    { key: 'global' },
+    { $set: { key: 'global', overrides, updatedAt: new Date().toISOString() } },
+    { upsert: true }
+  );
+  cachedOverrides = overrides;
+  cacheTime = Date.now();
 }
 
 // ========== Public API ==========
-
-export function getGlobalListingOverrides() {
-  return overrides;
-}
 
 export function applyListingOverrides(listing, listingOverrides) {
   const fo = listingOverrides[listing.id] || listingOverrides[String(listing.id)];
@@ -67,14 +65,19 @@ export function applyListingOverrides(listing, listingOverrides) {
 // ========== Routes ==========
 
 // Get all overrides
-router.get('/api/listing-overrides', (req, res) => {
+router.get('/api/listing-overrides', async (req, res) => {
+  const overrides = await getGlobalListingOverrides();
   res.json(overrides);
 });
 
 // Set/merge overrides for a listing
-router.put('/api/listing-overrides/:id', (req, res) => {
+router.put('/api/listing-overrides/:id', async (req, res) => {
   const listingId = parseInt(req.params.id);
-  if (mockListings && !mockListings.find(l => l.id === listingId)) {
+
+  // Validate listing exists
+  const db = getDB();
+  const listing = await db.collection('listings').findOne({ id: listingId });
+  if (!listing) {
     return res.status(404).json({ error: 'Listing not found' });
   }
 
@@ -83,23 +86,24 @@ router.put('/api/listing-overrides/:id', (req, res) => {
     return res.status(400).json({ error: 'No valid override fields provided', allowedFields: [...OVERRIDEABLE_FIELDS] });
   }
 
+  const overrides = await getGlobalListingOverrides();
   overrides[listingId] = { ...(overrides[listingId] || {}), ...clean };
-  persistOverrides();
+  await saveOverrides(overrides);
   res.json({ listingId, overrides: overrides[listingId] });
 });
 
 // Delete overrides for a listing
-router.delete('/api/listing-overrides/:id', (req, res) => {
+router.delete('/api/listing-overrides/:id', async (req, res) => {
   const listingId = req.params.id;
+  const overrides = await getGlobalListingOverrides();
   delete overrides[listingId];
-  persistOverrides();
+  await saveOverrides(overrides);
   res.json({ success: true });
 });
 
 // Clear all overrides
-router.delete('/api/listing-overrides', (req, res) => {
-  overrides = {};
-  persistOverrides();
+router.delete('/api/listing-overrides', async (req, res) => {
+  await saveOverrides({});
   res.json({ success: true });
 });
 
@@ -110,14 +114,8 @@ router.get('/api/listing-overrides/fields', (req, res) => {
 
 // ========== Init ==========
 
-export function initListingOverrides({ logsDir, listings }) {
-  overridesFile = join(logsDir, 'listing-overrides.json');
-  mockListings = listings;
-  loadOverrides();
-}
-
-export function setListingOverridesListings(listings) {
-  mockListings = listings;
+export function initListingOverrides() {
+  // No-op — DB connection is already established
 }
 
 export default router;

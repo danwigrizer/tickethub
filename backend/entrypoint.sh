@@ -1,41 +1,18 @@
 #!/bin/sh
-# Entrypoint script to set up symlinks for single Railway volume
+# Entrypoint script for TicketHub backend
 
-# Ensure storage directories exist first (before creating symlinks)
-mkdir -p /app/storage/config/scenarios
-mkdir -p /app/storage/data/venues
+# Ensure logs directory exists
+mkdir -p /app/logs
+
+# Storage volume symlinks (for Railway single-volume architecture)
 mkdir -p /app/storage/logs
 
-# The volume will be initialized by the entrypoint creating directories
-# Scenario files can be added later via Railway's web interface or volume management
-# The app works without scenario files - they're just presets for the admin panel
-
-# Remove existing directories if they exist (but not if they're already symlinks)
-if [ -d /app/config ] && [ ! -L /app/config ]; then
-  rm -rf /app/config
-fi
-if [ -d /app/data ] && [ ! -L /app/data ]; then
-  rm -rf /app/data
-fi
 if [ -d /app/logs ] && [ ! -L /app/logs ]; then
   rm -rf /app/logs
 fi
-
-# Create symlinks from expected paths to the storage volume
-# This allows the app to use /app/config, /app/data, /app/logs
-# while Railway volume is mounted at /app/storage
-if [ ! -L /app/config ]; then
-  ln -sf /app/storage/config /app/config
-fi
-
-if [ ! -L /app/data ]; then
-  ln -sf /app/storage/data /app/data
-fi
-
 if [ ! -L /app/logs ]; then
   ln -sf /app/storage/logs /app/logs
 fi
 
 # Start the application
 exec node server.js
-

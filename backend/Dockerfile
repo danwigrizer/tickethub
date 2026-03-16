@@ -12,7 +12,8 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 # Copy application code and entrypoint script
-COPY server.js experiments.js listingOverrides.js ./
+COPY server.js experiments.js listingOverrides.js db.js seed.js ./
+COPY data/ ./data/
 COPY entrypoint.sh ./
 
 # Create directory structure

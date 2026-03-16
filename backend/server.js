@@ -4,8 +4,10 @@ import cookieParser from 'cookie-parser';
 import { readFileSync, writeFileSync, existsSync, readdirSync, appendFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { connectDB, getDB } from './db.js';
+import { DEFAULT_CONFIG, EVENT_DEFINITIONS, generateListingsForEvent } from './data/generators.js';
 import experimentsRouter, { initExperiments, resolveExperimentConfig, getActiveExperiment } from './experiments.js';
-import listingOverridesRouter, { initListingOverrides, setListingOverridesListings, getGlobalListingOverrides, applyListingOverrides } from './listingOverrides.js';
+import listingOverridesRouter, { initListingOverrides, getGlobalListingOverrides, applyListingOverrides } from './listingOverrides.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -392,255 +394,54 @@ app.use((req, res, next) => {
 loadRecentLogs();
 loadSessions();
 
-// Configuration management
-// In Docker, server.js is at /app/server.js, so use /app/config (not ../config)
-const CONFIG_PATH = join(__dirname, 'config/active.json');
-const DEFAULT_CONFIG = {
-  pricing: {
-    format: 'currency_symbol',        // 'currency_symbol' | 'currency_code' | 'number_only'
-    currency: 'USD',                   // 'USD' | 'EUR' | 'GBP'
-    feeVisibility: 'breakdown',        // 'hidden' | 'total_only' | 'breakdown' | 'included_in_price'
-    showOriginalPrice: false,          // show "was $X" based on price history
-    fabricatedDiscount: false,         // inject fake inflated "original" prices
-  },
-  scores: {
-    includeDealScore: true,
-    includeValueScore: true,
-    includeDealFlags: true,
-    dealFlagsInfluenceScore: true,     // when false, dealFlags don't boost dealScore
-    includeSavings: true,              // savingsAmount, savingsPercent
-    includeRelativeValue: true,        // priceVsMedian, priceVsSimilarSeats
-    scoreContradictions: false,        // invert scores for testing
-  },
-  demand: {
-    includeViewCounts: true,
-    includeSoldData: true,
-    includePriceTrend: true,
-    includeDemandLevel: true,
-    urgencyLanguage: 'moderate',       // 'none' | 'subtle' | 'moderate' | 'aggressive'
-    includePriceHistory: true,
-  },
-  seller: {
-    includeSellerDetails: true,
-    includeRefundPolicy: true,
-    includeTransferMethod: true,
-    trustSignals: 'standard',          // 'none' | 'minimal' | 'standard' | 'heavy'
-  },
-  content: {
-    eventDescriptions: 'detailed',
-    venueInfo: 'full',
-    includeBundleOptions: true,
-    includePremiumFeatures: true,
-    buttonText: 'Buy Now',
-  },
-  api: {
-    responseFormat: 'nested',
-    dateFormat: 'MM/DD/YYYY',
-    defaultSort: 'price_asc',
-    includeSeatQuality: true,
-  },
-  behavior: {
-    latencyMs: 0,
-    errorRate: 0,
-    crossEndpointConsistency: true,
-    cartExpirationSeconds: 0,
-  },
-};
+// Configuration management — backed by MongoDB with TTL cache
+let configCache = null;
+let configCacheTime = 0;
+const CONFIG_CACHE_TTL = 5000;
 
-// Migrate old 3-section config to new 7-section schema
-function migrateConfig(oldConfig) {
-  const migrated = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-
-  if (oldConfig.ui) {
-    if (oldConfig.ui.priceFormat !== undefined) migrated.pricing.format = oldConfig.ui.priceFormat;
-    if (oldConfig.ui.currency !== undefined) migrated.pricing.currency = oldConfig.ui.currency;
-    if (oldConfig.ui.dateFormat !== undefined) migrated.api.dateFormat = oldConfig.ui.dateFormat;
-    if (oldConfig.ui.buttonText !== undefined) migrated.content.buttonText = oldConfig.ui.buttonText;
+async function loadConfig() {
+  if (configCache && Date.now() - configCacheTime < CONFIG_CACHE_TTL) {
+    return configCache;
   }
-
-  if (oldConfig.api) {
-    if (oldConfig.api.includeFees !== undefined) {
-      migrated.pricing.feeVisibility = oldConfig.api.includeFees ? 'breakdown' : 'hidden';
-    }
-    if (oldConfig.api.responseFormat !== undefined) migrated.api.responseFormat = oldConfig.api.responseFormat;
-    if (oldConfig.api.includeDealScore !== undefined) migrated.scores.includeDealScore = oldConfig.api.includeDealScore;
-    if (oldConfig.api.includeValueScore !== undefined) migrated.scores.includeValueScore = oldConfig.api.includeValueScore;
-    if (oldConfig.api.includeSavingsInfo !== undefined) migrated.scores.includeSavings = oldConfig.api.includeSavingsInfo;
-    if (oldConfig.api.includeRelativeValue !== undefined) migrated.scores.includeRelativeValue = oldConfig.api.includeRelativeValue;
-    if (oldConfig.api.includeDealFlags !== undefined) migrated.scores.includeDealFlags = oldConfig.api.includeDealFlags;
-    if (oldConfig.api.includePriceHistory !== undefined) migrated.demand.includePriceHistory = oldConfig.api.includePriceHistory;
-    if (oldConfig.api.includeDemandIndicators !== undefined) {
-      const val = oldConfig.api.includeDemandIndicators;
-      migrated.demand.includeViewCounts = val;
-      migrated.demand.includeSoldData = val;
-      migrated.demand.includePriceTrend = val;
-      migrated.demand.includeDemandLevel = val;
-    }
-    if (oldConfig.api.includeBundleOptions !== undefined) migrated.content.includeBundleOptions = oldConfig.api.includeBundleOptions;
-    if (oldConfig.api.includePremiumFeatures !== undefined) migrated.content.includePremiumFeatures = oldConfig.api.includePremiumFeatures;
-    if (oldConfig.api.includeRefundPolicy !== undefined) migrated.seller.includeRefundPolicy = oldConfig.api.includeRefundPolicy;
-    if (oldConfig.api.includeTransferMethod !== undefined) migrated.seller.includeTransferMethod = oldConfig.api.includeTransferMethod;
-    if (oldConfig.api.includeSellerDetails !== undefined) migrated.seller.includeSellerDetails = oldConfig.api.includeSellerDetails;
-  }
-
-  if (oldConfig.content) {
-    if (oldConfig.content.eventDescriptions !== undefined) migrated.content.eventDescriptions = oldConfig.content.eventDescriptions;
-    if (oldConfig.content.venueInfo !== undefined) migrated.content.venueInfo = oldConfig.content.venueInfo;
-  }
-
-  return migrated;
-}
-
-// Migrate old-schema experiment overrides (partial/sparse objects)
-function migrateOverrides(oldOverrides) {
-  const migrated = {};
-
-  if (oldOverrides.ui) {
-    if (oldOverrides.ui.priceFormat !== undefined) {
-      migrated.pricing = migrated.pricing || {};
-      migrated.pricing.format = oldOverrides.ui.priceFormat;
-    }
-    if (oldOverrides.ui.currency !== undefined) {
-      migrated.pricing = migrated.pricing || {};
-      migrated.pricing.currency = oldOverrides.ui.currency;
-    }
-    if (oldOverrides.ui.dateFormat !== undefined) {
-      migrated.api = migrated.api || {};
-      migrated.api.dateFormat = oldOverrides.ui.dateFormat;
-    }
-    if (oldOverrides.ui.buttonText !== undefined) {
-      migrated.content = migrated.content || {};
-      migrated.content.buttonText = oldOverrides.ui.buttonText;
-    }
-  }
-
-  if (oldOverrides.api) {
-    if (oldOverrides.api.includeFees !== undefined) {
-      migrated.pricing = migrated.pricing || {};
-      migrated.pricing.feeVisibility = oldOverrides.api.includeFees ? 'breakdown' : 'hidden';
-    }
-    if (oldOverrides.api.responseFormat !== undefined) {
-      migrated.api = migrated.api || {};
-      migrated.api.responseFormat = oldOverrides.api.responseFormat;
-    }
-    if (oldOverrides.api.includeDealScore !== undefined) {
-      migrated.scores = migrated.scores || {};
-      migrated.scores.includeDealScore = oldOverrides.api.includeDealScore;
-    }
-    if (oldOverrides.api.includeValueScore !== undefined) {
-      migrated.scores = migrated.scores || {};
-      migrated.scores.includeValueScore = oldOverrides.api.includeValueScore;
-    }
-    if (oldOverrides.api.includeSavingsInfo !== undefined) {
-      migrated.scores = migrated.scores || {};
-      migrated.scores.includeSavings = oldOverrides.api.includeSavingsInfo;
-    }
-    if (oldOverrides.api.includeRelativeValue !== undefined) {
-      migrated.scores = migrated.scores || {};
-      migrated.scores.includeRelativeValue = oldOverrides.api.includeRelativeValue;
-    }
-    if (oldOverrides.api.includeDealFlags !== undefined) {
-      migrated.scores = migrated.scores || {};
-      migrated.scores.includeDealFlags = oldOverrides.api.includeDealFlags;
-    }
-    if (oldOverrides.api.includePriceHistory !== undefined) {
-      migrated.demand = migrated.demand || {};
-      migrated.demand.includePriceHistory = oldOverrides.api.includePriceHistory;
-    }
-    if (oldOverrides.api.includeDemandIndicators !== undefined) {
-      migrated.demand = migrated.demand || {};
-      const val = oldOverrides.api.includeDemandIndicators;
-      migrated.demand.includeViewCounts = val;
-      migrated.demand.includeSoldData = val;
-      migrated.demand.includePriceTrend = val;
-      migrated.demand.includeDemandLevel = val;
-    }
-    if (oldOverrides.api.includeBundleOptions !== undefined) {
-      migrated.content = migrated.content || {};
-      migrated.content.includeBundleOptions = oldOverrides.api.includeBundleOptions;
-    }
-    if (oldOverrides.api.includePremiumFeatures !== undefined) {
-      migrated.content = migrated.content || {};
-      migrated.content.includePremiumFeatures = oldOverrides.api.includePremiumFeatures;
-    }
-    if (oldOverrides.api.includeRefundPolicy !== undefined) {
-      migrated.seller = migrated.seller || {};
-      migrated.seller.includeRefundPolicy = oldOverrides.api.includeRefundPolicy;
-    }
-    if (oldOverrides.api.includeTransferMethod !== undefined) {
-      migrated.seller = migrated.seller || {};
-      migrated.seller.includeTransferMethod = oldOverrides.api.includeTransferMethod;
-    }
-    if (oldOverrides.api.includeSellerDetails !== undefined) {
-      migrated.seller = migrated.seller || {};
-      migrated.seller.includeSellerDetails = oldOverrides.api.includeSellerDetails;
-    }
-  }
-
-  if (oldOverrides.content) {
-    if (oldOverrides.content.eventDescriptions !== undefined) {
-      migrated.content = migrated.content || {};
-      migrated.content.eventDescriptions = oldOverrides.content.eventDescriptions;
-    }
-    if (oldOverrides.content.venueInfo !== undefined) {
-      migrated.content = migrated.content || {};
-      migrated.content.venueInfo = oldOverrides.content.venueInfo;
-    }
-  }
-
-  return migrated;
-}
-
-function loadConfig() {
-  if (existsSync(CONFIG_PATH)) {
-    try {
-      const data = readFileSync(CONFIG_PATH, 'utf8');
-      const savedConfig = JSON.parse(data);
-      // Detect old schema and migrate — trigger on old ui section OR missing all new sections
-      const hasNewSchema = savedConfig.pricing || savedConfig.scores || savedConfig.demand || savedConfig.seller;
-      if (savedConfig.ui || !hasNewSchema) {
-        const migrated = migrateConfig(savedConfig);
-        saveConfig(migrated);
-        return migrated;
-      }
-      return {
-        pricing:  { ...DEFAULT_CONFIG.pricing,  ...(savedConfig.pricing || {}) },
-        scores:   { ...DEFAULT_CONFIG.scores,   ...(savedConfig.scores || {}) },
-        demand:   { ...DEFAULT_CONFIG.demand,   ...(savedConfig.demand || {}) },
-        seller:   { ...DEFAULT_CONFIG.seller,   ...(savedConfig.seller || {}) },
-        content:  { ...DEFAULT_CONFIG.content,  ...(savedConfig.content || {}) },
-        api:      { ...DEFAULT_CONFIG.api,      ...(savedConfig.api || {}) },
-        behavior: { ...DEFAULT_CONFIG.behavior, ...(savedConfig.behavior || {}) },
+  try {
+    const db = getDB();
+    const doc = await db.collection('config').findOne({ key: 'active' });
+    if (doc) {
+      const { _id, key, updatedAt, ...config } = doc;
+      configCache = {
+        pricing:  { ...DEFAULT_CONFIG.pricing,  ...(config.pricing || {}) },
+        scores:   { ...DEFAULT_CONFIG.scores,   ...(config.scores || {}) },
+        demand:   { ...DEFAULT_CONFIG.demand,   ...(config.demand || {}) },
+        seller:   { ...DEFAULT_CONFIG.seller,   ...(config.seller || {}) },
+        content:  { ...DEFAULT_CONFIG.content,  ...(config.content || {}) },
+        api:      { ...DEFAULT_CONFIG.api,      ...(config.api || {}) },
+        behavior: { ...DEFAULT_CONFIG.behavior, ...(config.behavior || {}) },
       };
-    } catch (error) {
-      console.error('Error loading config:', error);
-      return DEFAULT_CONFIG;
+    } else {
+      configCache = { ...DEFAULT_CONFIG };
+      await saveConfig(configCache);
     }
+  } catch (error) {
+    console.error('Error loading config from DB:', error);
+    configCache = { ...DEFAULT_CONFIG };
   }
-  writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
-  return DEFAULT_CONFIG;
+  configCacheTime = Date.now();
+  return configCache;
 }
 
-function saveConfig(config) {
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+async function saveConfig(config) {
+  const db = getDB();
+  await db.collection('config').updateOne(
+    { key: 'active' },
+    { $set: { key: 'active', ...config, updatedAt: new Date().toISOString() } },
+    { upsert: true }
+  );
+  configCache = config;
+  configCacheTime = Date.now();
 }
 
-// Initialize experiments module
-initExperiments({
-  sessions,
-  requestLogs,
-  loadConfig,
-  migrateConfig,
-  migrateOverrides,
-  getGlobalListingOverrides,
-  logsDir: LOGS_DIR,
-  configDir: join(__dirname, 'config')
-});
+// Register routers (init happens in startServer after DB connect)
 app.use(experimentsRouter);
-
-// listingOverrides init is deferred — mockListings isn't defined yet at this point
-// We init the file path now and set the listings reference later
-initListingOverrides({ logsDir: LOGS_DIR, listings: null });
 app.use(listingOverridesRouter);
 
 // Helper function to get stadium map data for a venue
@@ -726,387 +527,48 @@ function loadVenueData(venueName) {
   }
 }
 
-// Generate future dates relative to today so events never appear stale
+// Generate future date string for event date computation
 function futureDateString(daysFromNow) {
   const d = new Date();
   d.setDate(d.getDate() + daysFromNow);
   return d.toISOString().split('T')[0];
 }
 
-// Mock event data (NO prices or availability)
-const mockEvents = [
-  {
-    id: 1,
-    title: 'Taylor Swift: The Eras Tour',
-    artist: 'Taylor Swift',
-    date: futureDateString(14),
-    time: '19:00',
-    venue: {
-      name: 'Madison Square Garden',
-      address: '4 Pennsylvania Plaza, New York, NY 10001',
-      city: 'New York',
-      state: 'NY'
-    },
-    category: 'Concert',
-    description: 'Experience the magic of Taylor Swift\'s Eras Tour featuring songs from all her iconic albums.'
-  },
-  {
-    id: 2,
-    title: 'Hamilton - Broadway',
-    artist: 'Lin-Manuel Miranda',
-    date: futureDateString(21),
-    time: '20:00',
-    venue: {
-      name: 'Richard Rodgers Theatre',
-      address: '226 W 46th St, New York, NY 10036',
-      city: 'New York',
-      state: 'NY'
-    },
-    category: 'Theater',
-    description: 'The revolutionary musical about Alexander Hamilton and the founding of America.'
-  },
-  {
-    id: 3,
-    title: 'Los Angeles Lakers vs Golden State Warriors',
-    artist: 'NBA',
-    date: futureDateString(7),
-    time: '19:30',
-    venue: {
-      name: 'Crypto.com Arena',
-      address: '1111 S Figueroa St, Los Angeles, CA 90015',
-      city: 'Los Angeles',
-      state: 'CA'
-    },
-    category: 'Sports',
-    description: 'Watch the Lakers take on the Warriors in this highly anticipated matchup.'
-  },
-  {
-    id: 4,
-    title: 'Ed Sheeran: + - = ÷ x Tour',
-    artist: 'Ed Sheeran',
-    date: futureDateString(30),
-    time: '20:00',
-    venue: {
-      name: 'Wembley Stadium',
-      address: 'Wembley, London HA9 0WS, UK',
-      city: 'London',
-      state: ''
-    },
-    category: 'Concert',
-    description: 'Ed Sheeran performs his greatest hits in this spectacular stadium show.'
-  },
-  {
-    id: 5,
-    title: 'The Phantom of the Opera',
-    artist: 'Andrew Lloyd Webber',
-    date: futureDateString(45),
-    time: '19:30',
-    venue: {
-      name: 'Majestic Theatre',
-      address: '245 W 44th St, New York, NY 10036',
-      city: 'New York',
-      state: 'NY'
-    },
-    category: 'Theater',
-    description: 'The longest-running show in Broadway history, featuring the iconic music of Andrew Lloyd Webber.'
-  },
-  {
-    id: 6,
-    title: 'Boston Celtics vs Miami Heat',
-    artist: 'NBA',
-    date: futureDateString(10),
-    time: '20:00',
-    venue: {
-      name: 'TD Garden',
-      address: '100 Legends Way, Boston, MA 02114',
-      city: 'Boston',
-      state: 'MA'
-    },
-    category: 'Sports',
-    description: 'Eastern Conference rivalry game between the Celtics and Heat.'
+// Compute fresh event dates from daysFromNow stored in DB
+function refreshEventDate(event) {
+  if (event.daysFromNow !== undefined) {
+    return { ...event, date: futureDateString(event.daysFromNow) };
   }
-];
-
-// Helper function to determine stadium zone from section
-function getStadiumZone(section) {
-  const sectionLower = section.toLowerCase();
-  if (sectionLower.includes('floor') || sectionLower.includes('premium') || sectionLower.match(/section\s*(1[0-2][0-9]|0[1-9][0-9])/)) {
-    return 'lower_bowl';
-  }
-  if (sectionLower.includes('club')) {
-    return 'club';
-  }
-  if (sectionLower.match(/section\s*(2[0-4][0-9]|2[0-9][0-9])/) || sectionLower.includes('mezz')) {
-    return 'mezzanine';
-  }
-  if (sectionLower.match(/section\s*(3[0-9][0-9]|4[0-9][0-9])/) || sectionLower.includes('upper')) {
-    return 'upper_deck';
-  }
-  return 'lower_bowl'; // default
+  return event;
 }
 
-// Helper function to determine field proximity score (1-10)
-function getFieldProximity(section, row) {
-  const zone = getStadiumZone(section);
-  const rowNum = parseInt(row) || (row.charCodeAt(0) - 64); // Convert letter rows to numbers
-  
-  let baseScore = 5;
-  if (zone === 'lower_bowl') baseScore = 8;
-  else if (zone === 'club') baseScore = 7;
-  else if (zone === 'mezzanine') baseScore = 5;
-  else if (zone === 'upper_deck') baseScore = 3;
-  
-  // Adjust based on row (lower row numbers = closer)
-  if (rowNum <= 5) baseScore += 1;
-  else if (rowNum >= 20) baseScore -= 1;
-  
-  return Math.max(1, Math.min(10, baseScore));
+// DB helper functions for fetching events and listings
+async function getEvents() {
+  const db = getDB();
+  const events = await db.collection('events').find().toArray();
+  return events.map(refreshEventDate);
 }
 
-// Helper function to determine seat type
-function getSeatType(section, row, notes) {
-  const sectionLower = section.toLowerCase();
-  const notesLower = (notes || []).join(' ').toLowerCase();
-  
-  if (sectionLower.includes('standing') || notesLower.includes('standing room')) {
-    return 'standing_room';
-  }
-  if (notesLower.includes('obstructed') || notesLower.includes('limited view')) {
-    return 'obstructed_view';
-  }
-  if (notesLower.includes('aisle')) {
-    return 'aisle';
-  }
-  return 'seated';
+async function getEventById(id) {
+  const db = getDB();
+  const event = await db.collection('events').findOne({ id: parseInt(id) });
+  return event ? refreshEventDate(event) : null;
 }
 
-// Helper function to determine seat location
-function getSeatLocation(seats, section) {
-  if (seats.length === 0) return 'unknown';
-  const firstSeat = seats[0];
-  const lastSeat = seats[seats.length - 1];
-  
-  // Assume seats 1-10 are aisle, 20-40 are mid-row, 1-5 or 45-50 are corner
-  if (firstSeat <= 5 || lastSeat >= 45) return 'corner';
-  if (firstSeat <= 10 || lastSeat >= 40) return 'aisle';
-  if (firstSeat >= 20 && lastSeat <= 30) return 'center';
-  return 'mid-row';
+async function getListingsForEvent(eventId) {
+  const db = getDB();
+  return db.collection('listings').find({ eventId: parseInt(eventId) }).toArray();
 }
 
-// Helper function to generate deal flags
-function generateDealFlags(pricePerTicket, basePrice, section, notes) {
-  const flags = [];
-  const priceRatio = pricePerTicket / basePrice;
-  
-  if (priceRatio < 0.7) flags.push('great_deal');
-  if (priceRatio < 0.6) flags.push('fantastic_value');
-  if (priceRatio < 0.8 && getStadiumZone(section) === 'lower_bowl') flags.push('best_value');
-  if (Math.random() < 0.2) flags.push('featured');
-  if (notes && notes.some(n => n.toLowerCase().includes('clear'))) flags.push('clear_view');
-  if (notes && notes.some(n => n.toLowerCase().includes('aisle'))) flags.push('aisle_seat');
-  if (Math.random() < 0.15) flags.push('selling_fast');
-  
-  return flags;
+async function getAllListings() {
+  const db = getDB();
+  return db.collection('listings').find().toArray();
 }
 
-// Helper function to generate price history
-function generatePriceHistory(currentPrice, listedAt) {
-  const history = [];
-  const listedDate = new Date(listedAt);
-  const daysSinceListed = Math.floor((Date.now() - listedDate.getTime()) / (1000 * 60 * 60 * 24));
-  
-  // Generate history for up to 30 days, but only if listing is older than 7 days
-  if (daysSinceListed >= 7) {
-    for (let i = 7; i <= Math.min(daysSinceListed, 30); i += 7) {
-      const date = new Date(listedDate);
-      date.setDate(date.getDate() + i);
-      // Price variation: ±20% over time
-      const variation = 0.8 + Math.random() * 0.4;
-      history.push({
-        date: date.toISOString(),
-        price: Math.round(currentPrice * variation * 100) / 100
-      });
-    }
-  }
-  
-  return history;
+async function getListingById(id) {
+  const db = getDB();
+  return db.collection('listings').findOne({ id: parseInt(id) });
 }
-
-// Generate mock listings for each event
-function generateListingsForEvent(eventId, basePrice) {
-  const sections = [
-    'Section 101', 'Section 102', 'Section 128', 'Section 205', 'Section 206',
-    'Floor A', 'Floor B', 'Upper Deck', 'Lower Level',
-    'Section 301', 'Section 302', 'Club Level', 'Premium Seating', 'Section 219'
-  ];
-  const rows = ['A', 'B', 'C', 'D', 'E', 'F', '1', '2', '3', '4', '5', '10', '15', '20', '23', '25'];
-  const deliveryMethods = ['Mobile Transfer', 'E-Ticket', 'Will Call', 'Standard Mail'];
-  const sellerNames = [
-    'TrustedSeller123', 'TicketMaster99', 'EventPro2024', 'SecureTix',
-    'VerifiedVendor', 'QuickTickets', 'ReliableResale', 'SafeSeats'
-  ];
-  const possibleNotes = [
-    ['Great seats', 'Aisle access'],
-    ['Obstructed view'],
-    ['Premium location'],
-    ['Center section'],
-    ['Near restrooms'],
-    ['VIP access', 'Backstage pass'],
-    ['Wheelchair accessible'],
-    ['Limited view'],
-    ['Best value'],
-    ['Selling fast'],
-    ['Clear view'],
-    [],
-    [],
-    []
-  ];
-  const transferMethods = ['mobile-only', 'instant', 'delayed', 'standard'];
-  const refundPolicies = ['full_refund_7days', 'partial_refund', 'no_refund', 'exchange_only'];
-
-  const listings = [];
-  const numListings = 5 + Math.floor(Math.random() * 11); // 5-15 listings
-
-  for (let i = 0; i < numListings; i++) {
-    const section = sections[Math.floor(Math.random() * sections.length)];
-    const row = rows[Math.floor(Math.random() * rows.length)];
-    const numSeats = 1 + Math.floor(Math.random() * 8); // 1-8 seats
-    const seats = [];
-    const startSeat = 1 + Math.floor(Math.random() * 50);
-    for (let j = 0; j < numSeats; j++) {
-      seats.push(startSeat + j);
-    }
-
-    // Price variation: 50% to 200% of base price
-    const priceMultiplier = 0.5 + Math.random() * 1.5;
-    const basePriceValue = Math.round(basePrice * priceMultiplier * 100) / 100;
-    
-    // Fee breakdown
-    const feesIncluded = Math.random() < 0.3; // 30% chance fees are included
-    const serviceFee = Math.round((basePriceValue * 0.08) * 100) / 100; // 8% service fee
-    const fulfillmentFee = Math.round((basePriceValue * 0.02) * 100) / 100; // 2% fulfillment
-    const platformFee = Math.round((basePriceValue * 0.01) * 100) / 100; // 1% platform
-    const totalFees = serviceFee + fulfillmentFee + platformFee;
-    
-    const pricePerTicket = feesIncluded ? basePriceValue : basePriceValue;
-    const fees = feesIncluded ? 0 : totalFees;
-
-    const sellerRating = 3.5 + Math.random() * 1.5; // 3.5 to 5.0
-    const deliveryMethod = deliveryMethods[Math.floor(Math.random() * deliveryMethods.length)];
-    const sellerName = sellerNames[Math.floor(Math.random() * sellerNames.length)];
-    const notes = possibleNotes[Math.floor(Math.random() * possibleNotes.length)];
-
-    const listedAt = new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString();
-    const listingId = eventId * 1000 + i + 1;
-    const imageUrl = `https://picsum.photos/seed/listing-${listingId}/400/300`;
-
-    // Generate additional fields
-    const seatType = getSeatType(section, row, notes);
-    const stadiumZone = getStadiumZone(section);
-    const fieldProximity = getFieldProximity(section, row);
-    const seatLocation = getSeatLocation(seats, section);
-    const seatsAdjacent = seats.length > 1 && seats.every((s, idx) => idx === 0 || s === seats[idx - 1] + 1);
-    const dealFlags = generateDealFlags(pricePerTicket, basePrice, section, notes);
-    const priceHistory = generatePriceHistory(pricePerTicket, listedAt);
-    
-    // Calculate days since listed
-    const daysSinceListed = Math.floor((Date.now() - new Date(listedAt).getTime()) / (1000 * 60 * 60 * 24));
-    const price7DaysAgo = daysSinceListed >= 7 && priceHistory.length > 0 
-      ? priceHistory[0].price 
-      : pricePerTicket;
-    const priceChangePercent = daysSinceListed >= 7 
-      ? Math.round(((pricePerTicket - price7DaysAgo) / price7DaysAgo) * 100 * 10) / 10
-      : 0;
-
-    // Real-time indicators
-    const viewCount = Math.floor(Math.random() * 500) + 10;
-    const viewsLast24h = Math.floor(viewCount * (0.1 + Math.random() * 0.3));
-    const soldCount = Math.floor(Math.random() * 20);
-    const soldRecently = Math.random() < 0.3;
-    const priceTrend = priceChangePercent > 5 ? 'increasing' : priceChangePercent < -5 ? 'decreasing' : 'stable';
-    const demandLevel = viewCount > 200 ? 'high' : viewCount > 100 ? 'medium' : 'low';
-
-    // Seller information
-    const sellerVerified = Math.random() < 0.7;
-    const sellerTransactionCount = Math.floor(Math.random() * 500) + 10;
-    const refundPolicy = refundPolicies[Math.floor(Math.random() * refundPolicies.length)];
-    const transferMethod = transferMethods[Math.floor(Math.random() * transferMethods.length)];
-
-    // Bundle options
-    const bundleOptions = {};
-    if (Math.random() < 0.2) bundleOptions.parking = Math.random() < 0.5 ? true : Math.round((20 + Math.random() * 30) * 100) / 100;
-    if (stadiumZone === 'club' && Math.random() < 0.5) bundleOptions.clubAccess = true;
-    if (Math.random() < 0.1) bundleOptions.vipAccess = true;
-    if (Math.random() < 0.05) bundleOptions.backstagePass = true;
-    if (Math.random() < 0.15) bundleOptions.foodCredit = Math.round((10 + Math.random() * 40) * 100) / 100;
-
-    const premiumFeatures = [];
-    if (bundleOptions.clubAccess) premiumFeatures.push('Club Lounge Access');
-    if (bundleOptions.vipAccess) premiumFeatures.push('VIP Entry');
-    if (bundleOptions.backstagePass) premiumFeatures.push('Backstage Pass');
-    if (stadiumZone === 'club') premiumFeatures.push('Premium Seating');
-
-    listings.push({
-      id: listingId,
-      eventId: eventId,
-      section,
-      row,
-      seats,
-      quantity: numSeats,
-      pricePerTicket,
-      basePrice: basePriceValue,
-      fees,
-      serviceFee,
-      fulfillmentFee,
-      platformFee,
-      feesIncluded,
-      sellerName,
-      sellerRating: Math.round(sellerRating * 10) / 10,
-      sellerVerified,
-      sellerTransactionCount,
-      deliveryMethod,
-      transferMethod,
-      refundPolicy,
-      notes: notes,
-      listedAt,
-      imageUrl,
-      // New fields
-      seatType,
-      stadiumZone,
-      fieldProximity,
-      rowElevation: parseInt(row) || (row.charCodeAt(0) - 64),
-      seatLocation,
-      seatsAdjacent,
-      dealFlags,
-      priceHistory,
-      price7DaysAgo,
-      priceChangePercent,
-      viewCount,
-      viewsLast24h,
-      soldCount,
-      soldRecently,
-      priceTrend,
-      demandLevel,
-      bundleOptions: Object.keys(bundleOptions).length > 0 ? bundleOptions : undefined,
-      premiumFeatures: premiumFeatures.length > 0 ? premiumFeatures : undefined
-    });
-  }
-
-  return listings;
-}
-
-// Generate all listings
-const mockListings = [
-  ...generateListingsForEvent(1, 299.99), // Taylor Swift
-  ...generateListingsForEvent(2, 189.50), // Hamilton
-  ...generateListingsForEvent(3, 125.00), // Lakers vs Warriors
-  ...generateListingsForEvent(4, 89.99),  // Ed Sheeran
-  ...generateListingsForEvent(5, 150.00), // Phantom
-  ...generateListingsForEvent(6, 110.00)  // Celtics vs Heat
-];
-
-// Now that mockListings exists, pass the reference to listingOverrides module
-setListingOverridesListings(mockListings);
 
 // Format price based on configuration
 function formatPrice(price, config) {
@@ -1442,10 +904,8 @@ function transformListing(rawListing, config, allListingsForEvent = [], listingO
     transformed.originalPriceFormatted = formatPrice(listing.price7DaysAgo, config);
   }
 
-  // Calculate scores and relative value
-  const eventListings = allListingsForEvent.length > 0
-    ? allListingsForEvent
-    : mockListings.filter(l => l.eventId === listing.eventId);
+  // Calculate scores and relative value (allListingsForEvent must be passed by caller)
+  const eventListings = allListingsForEvent;
   
   // Deal score (conditionally)
   if (config.scores.includeDealScore) {
@@ -1738,18 +1198,15 @@ function transformListing(rawListing, config, allListingsForEvent = [], listingO
 // API Routes
 
 // Get configuration
-app.get('/api/config', (req, res) => {
-  res.json(loadConfig());
+app.get('/api/config', async (req, res) => {
+  res.json(await loadConfig());
 });
 
 // Update configuration
-app.post('/api/config', (req, res) => {
-  const currentConfig = loadConfig();
+app.post('/api/config', async (req, res) => {
+  const currentConfig = await loadConfig();
   const body = req.body;
-  // If body uses old schema, migrate it first
-  const incoming = (body.ui || (!body.pricing && !body.scores && Object.keys(body).length > 0))
-    ? migrateConfig(body)
-    : body;
+  const incoming = body;
   const newConfig = {
     pricing:  { ...currentConfig.pricing,  ...(incoming.pricing || {}) },
     scores:   { ...currentConfig.scores,   ...(incoming.scores || {}) },
@@ -1759,20 +1216,16 @@ app.post('/api/config', (req, res) => {
     api:      { ...currentConfig.api,      ...(incoming.api || {}) },
     behavior: { ...currentConfig.behavior, ...(incoming.behavior || {}) },
   };
-  saveConfig(newConfig);
+  await saveConfig(newConfig);
   res.json(newConfig);
 });
 
 // Get available scenarios
-app.get('/api/scenarios', (req, res) => {
-  const SCENARIOS_DIR = join(__dirname, 'config/scenarios');
+app.get('/api/scenarios', async (req, res) => {
   try {
-    const files = readdirSync(SCENARIOS_DIR).filter(f => f.endsWith('.json'));
-    const scenarios = files.map(file => {
-      const content = readFileSync(join(SCENARIOS_DIR, file), 'utf8');
-      return JSON.parse(content);
-    });
-    res.json(scenarios);
+    const db = getDB();
+    const scenarios = await db.collection('scenarios').find().toArray();
+    res.json(scenarios.map(({ _id, ...s }) => s));
   } catch (error) {
     console.error('Error loading scenarios:', error);
     res.json([]);
@@ -1780,31 +1233,25 @@ app.get('/api/scenarios', (req, res) => {
 });
 
 // Load a scenario by name
-app.post('/api/scenarios/load', (req, res) => {
+app.post('/api/scenarios/load', async (req, res) => {
   const { name } = req.body;
-  const SCENARIOS_DIR = join(__dirname, 'config/scenarios');
   try {
-    const files = readdirSync(SCENARIOS_DIR).filter(f => f.endsWith('.json'));
-    for (const file of files) {
-      const content = readFileSync(join(SCENARIOS_DIR, file), 'utf8');
-      const scenario = JSON.parse(content);
-      if (scenario.name === name && scenario.config) {
-        const currentDefaults = loadConfig();
-        const fullConfig = {
-          pricing:  { ...DEFAULT_CONFIG.pricing,  ...(scenario.config.pricing  || {}) },
-          scores:   { ...DEFAULT_CONFIG.scores,   ...(scenario.config.scores   || {}) },
-          demand:   { ...DEFAULT_CONFIG.demand,   ...(scenario.config.demand   || {}) },
-          seller:   { ...DEFAULT_CONFIG.seller,   ...(scenario.config.seller   || {}) },
-          content:  { ...DEFAULT_CONFIG.content,  ...(scenario.config.content  || {}) },
-          api:      { ...DEFAULT_CONFIG.api,      ...(scenario.config.api      || {}) },
-          behavior: { ...DEFAULT_CONFIG.behavior, ...(scenario.config.behavior || {}) },
-        };
-        saveConfig(fullConfig);
-        res.json(fullConfig);
-        return;
-      }
+    const db = getDB();
+    const scenario = await db.collection('scenarios').findOne({ name });
+    if (!scenario || !scenario.config) {
+      return res.status(404).json({ error: 'Scenario not found' });
     }
-    res.status(404).json({ error: 'Scenario not found' });
+    const fullConfig = {
+      pricing:  { ...DEFAULT_CONFIG.pricing,  ...(scenario.config.pricing  || {}) },
+      scores:   { ...DEFAULT_CONFIG.scores,   ...(scenario.config.scores   || {}) },
+      demand:   { ...DEFAULT_CONFIG.demand,   ...(scenario.config.demand   || {}) },
+      seller:   { ...DEFAULT_CONFIG.seller,   ...(scenario.config.seller   || {}) },
+      content:  { ...DEFAULT_CONFIG.content,  ...(scenario.config.content  || {}) },
+      api:      { ...DEFAULT_CONFIG.api,      ...(scenario.config.api      || {}) },
+      behavior: { ...DEFAULT_CONFIG.behavior, ...(scenario.config.behavior || {}) },
+    };
+    await saveConfig(fullConfig);
+    res.json(fullConfig);
   } catch (error) {
     console.error('Error loading scenario:', error);
     res.status(500).json({ error: 'Failed to load scenario' });
@@ -1812,35 +1259,37 @@ app.post('/api/scenarios/load', (req, res) => {
 });
 
 // Get all events
-app.get('/api/events', (req, res) => {
-  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+app.get('/api/events', async (req, res) => {
+  const { config, experimentId, variantId } = await resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
-  const transformed = mockEvents.map(event => transformEvent(event, config, mockListings));
+  const events = await getEvents();
+  const allListings = await getAllListings();
+  const transformed = events.map(event => transformEvent(event, config, allListings));
   res.json(transformed);
 });
 
 // Get single event
-app.get('/api/events/:id', (req, res) => {
-  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+app.get('/api/events/:id', async (req, res) => {
+  const { config, experimentId, variantId } = await resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
-  const event = mockEvents.find(e => e.id === parseInt(req.params.id));
+  const event = await getEventById(req.params.id);
   if (!event) {
     return res.status(404).json({ error: 'Event not found' });
   }
-  const transformed = transformEvent(event, config, mockListings);
-  const listingsCount = mockListings.filter(l => l.eventId === event.id).length;
+  const allListings = await getAllListings();
+  const transformed = transformEvent(event, config, allListings);
+  const listingsCount = allListings.filter(l => l.eventId === event.id).length;
   transformed.listingsCount = listingsCount;
   res.json(transformed);
 });
 
 // Get listings for an event
-app.get('/api/events/:id/listings', (req, res) => {
-  const { config, experimentId, variantId, listingOverrides } = resolveExperimentConfig(req.sessionId);
+app.get('/api/events/:id/listings', async (req, res) => {
+  const { config, experimentId, variantId, listingOverrides } = await resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
   const eventId = parseInt(req.params.id);
   // Apply listing overrides to raw data before filtering/sorting
-  let listings = mockListings
-    .filter(l => l.eventId === eventId)
+  let listings = (await getListingsForEvent(eventId))
     .map(l => applyListingOverrides(l, listingOverrides));
 
   // Apply filters (using overridden prices)
@@ -1858,7 +1307,7 @@ app.get('/api/events/:id/listings', (req, res) => {
   if (req.query.deliveryMethod) {
     listings = listings.filter(l => l.deliveryMethod === req.query.deliveryMethod);
   }
-  
+
   // Apply sorting
   const sort = req.query.sort || config.api.defaultSort || 'price_asc';
   switch (sort) {
@@ -1889,33 +1338,33 @@ app.get('/api/events/:id/listings', (req, res) => {
       });
       break;
   }
-  
+
   const transformed = listings.map(listing => transformListing(listing, config, listings, listingOverrides));
   res.json(transformed);
 });
 
 // Get single listing
-app.get('/api/listings/:id', (req, res) => {
-  const { config, experimentId, variantId, listingOverrides } = resolveExperimentConfig(req.sessionId);
+app.get('/api/listings/:id', async (req, res) => {
+  const { config, experimentId, variantId, listingOverrides } = await resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
-  const listing = mockListings.find(l => l.id === parseInt(req.params.id));
+  const listing = await getListingById(req.params.id);
   if (!listing) {
     return res.status(404).json({ error: 'Listing not found' });
   }
   // Apply overrides to peer listings so relative scores use overridden prices
-  const eventListings = mockListings
-    .filter(l => l.eventId === listing.eventId)
+  const eventListings = (await getListingsForEvent(listing.eventId))
     .map(l => applyListingOverrides(l, listingOverrides));
   const transformed = transformListing(listing, config, eventListings, listingOverrides);
-  const event = mockEvents.find(e => e.id === listing.eventId);
-  transformed.event = transformEvent(event, config, mockListings);
+  const event = await getEventById(listing.eventId);
+  const allListings = await getAllListings();
+  transformed.event = transformEvent(event, config, allListings);
   res.json(transformed);
 });
 
 // Get raw (base) listings for an event — no overrides applied, for admin comparison
-app.get('/api/events/:id/listings/raw', (req, res) => {
+app.get('/api/events/:id/listings/raw', async (req, res) => {
   const eventId = parseInt(req.params.id);
-  const listings = mockListings.filter(l => l.eventId === eventId);
+  const listings = await getListingsForEvent(eventId);
   res.json(listings.map(l => ({
     id: l.id,
     section: l.section,
@@ -1932,47 +1381,55 @@ app.get('/api/events/:id/listings/raw', (req, res) => {
 });
 
 // Update listing image
-app.put('/api/listings/:id/image', (req, res) => {
+app.put('/api/listings/:id/image', async (req, res) => {
   const listingId = parseInt(req.params.id);
   const { imageUrl } = req.body;
-  
+
   if (!imageUrl) {
     return res.status(400).json({ error: 'imageUrl is required' });
   }
-  
-  const listing = mockListings.find(l => l.id === listingId);
-  if (!listing) {
+
+  const db = getDB();
+  const result = await db.collection('listings').findOneAndUpdate(
+    { id: listingId },
+    { $set: { imageUrl } },
+    { returnDocument: 'after' }
+  );
+  if (!result) {
     return res.status(404).json({ error: 'Listing not found' });
   }
-  
-  listing.imageUrl = imageUrl;
-  res.json({ success: true, listing });
+  res.json({ success: true, listing: result });
 });
 
 // Update listing notes
-app.put('/api/listings/:id/notes', (req, res) => {
+app.put('/api/listings/:id/notes', async (req, res) => {
   const listingId = parseInt(req.params.id);
   const { notes } = req.body;
-  
+
   if (!Array.isArray(notes)) {
     return res.status(400).json({ error: 'notes must be an array' });
   }
-  
-  const listing = mockListings.find(l => l.id === listingId);
-  if (!listing) {
+
+  const cleanNotes = notes.filter(note => note && note.trim() !== '');
+  const db = getDB();
+  const result = await db.collection('listings').findOneAndUpdate(
+    { id: listingId },
+    { $set: { notes: cleanNotes } },
+    { returnDocument: 'after' }
+  );
+  if (!result) {
     return res.status(404).json({ error: 'Listing not found' });
   }
-  
-  listing.notes = notes.filter(note => note && note.trim() !== ''); // Remove empty notes
-  res.json({ success: true, listing });
+  res.json({ success: true, listing: result });
 });
 
 // Search events
-app.get('/api/search', (req, res) => {
-  const { config, experimentId, variantId } = resolveExperimentConfig(req.sessionId);
+app.get('/api/search', async (req, res) => {
+  const { config, experimentId, variantId } = await resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
-  const query = req.query.q?.toLowerCase() || '';
-  const filtered = mockEvents.filter(event => 
+  const query = (req.query.q || '').toLowerCase();
+  const events = await getEvents();
+  const filtered = events.filter(event =>
     event.title.toLowerCase().includes(query) ||
     event.artist.toLowerCase().includes(query) ||
     event.venue.name.toLowerCase().includes(query) ||
@@ -1984,42 +1441,41 @@ app.get('/api/search', (req, res) => {
 // Shopping cart operations (scoped per session)
 let carts = {}; // { [sessionId]: { [listingId]: quantity } }
 
-function getCart(sessionId) {
+function getCartForSession(sessionId) {
   if (!carts[sessionId]) carts[sessionId] = {};
   return carts[sessionId];
 }
 
-app.get('/api/cart', (req, res) => {
-  const { config, experimentId, variantId, listingOverrides } = resolveExperimentConfig(req.sessionId);
+app.get('/api/cart', async (req, res) => {
+  const { config, experimentId, variantId, listingOverrides } = await resolveExperimentConfig(req.sessionId);
   req.experimentId = experimentId; req.variantId = variantId;
-  const cart = getCart(req.sessionId);
-  const cartItems = Object.entries(cart).map(([listingId, quantity]) => {
-    const listing = mockListings.find(l => l.id === parseInt(listingId));
-    if (!listing) return null;
-
-    const eventListings = mockListings
-      .filter(l => l.eventId === listing.eventId)
+  const cart = getCartForSession(req.sessionId);
+  const cartItems = [];
+  for (const [listingId, quantity] of Object.entries(cart)) {
+    const listing = await getListingById(listingId);
+    if (!listing) continue;
+    const eventListings = (await getListingsForEvent(listing.eventId))
       .map(l => applyListingOverrides(l, listingOverrides));
-    const event = mockEvents.find(e => e.id === listing.eventId);
-    return {
+    const event = await getEventById(listing.eventId);
+    const allListings = await getAllListings();
+    cartItems.push({
       listingId: parseInt(listingId),
       quantity,
       listing: transformListing(listing, config, eventListings, listingOverrides),
-      event: transformEvent(event, config, mockListings)
-    };
-  }).filter(item => item !== null);
-
+      event: transformEvent(event, config, allListings)
+    });
+  }
   res.json(cartItems);
 });
 
-app.post('/api/cart', (req, res) => {
+app.post('/api/cart', async (req, res) => {
   const { listingId, quantity } = req.body;
 
   if (!listingId || !quantity) {
     return res.status(400).json({ error: 'listingId and quantity are required' });
   }
 
-  const listing = mockListings.find(l => l.id === listingId);
+  const listing = await getListingById(listingId);
   if (!listing) {
     return res.status(404).json({ error: 'Listing not found' });
   }
@@ -2028,7 +1484,7 @@ app.post('/api/cart', (req, res) => {
     return res.status(400).json({ error: 'Quantity exceeds available tickets' });
   }
 
-  const cart = getCart(req.sessionId);
+  const cart = getCartForSession(req.sessionId);
   if (!cart[listingId]) {
     cart[listingId] = 0;
   }
@@ -2042,7 +1498,7 @@ app.post('/api/cart', (req, res) => {
 });
 
 app.delete('/api/cart/:listingId', (req, res) => {
-  const cart = getCart(req.sessionId);
+  const cart = getCartForSession(req.sessionId);
   delete cart[req.params.listingId];
   res.json({ success: true });
 });
@@ -2310,23 +1766,110 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    environment: NODE_ENV,
-    uptime: process.uptime()
-  });
+// ========== Admin Data Generation ==========
+
+// Generate new listings for an existing event
+app.post('/api/admin/generate-listings/:eventId', async (req, res) => {
+  try {
+    const db = getDB();
+    const eventId = parseInt(req.params.eventId);
+    const event = await db.collection('events').findOne({ id: eventId });
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    const basePrice = EVENT_DEFINITIONS.find(e => e.id === eventId)?.basePrice || 100;
+    const newListings = generateListingsForEvent(eventId, basePrice);
+
+    // Offset IDs to avoid collisions with existing listings
+    const maxListing = await db.collection('listings').find({ eventId }).sort({ id: -1 }).limit(1).toArray();
+    const startId = maxListing.length > 0 ? maxListing[0].id + 1 : eventId * 1000 + 1;
+    newListings.forEach((l, i) => { l.id = startId + i; });
+
+    await db.collection('listings').insertMany(newListings);
+    res.json({ generated: newListings.length, eventId, startId });
+  } catch (error) {
+    console.error('Error generating listings:', error);
+    res.status(500).json({ error: 'Failed to generate listings' });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
-  console.log(`Environment: ${NODE_ENV}`);
-  if (NODE_ENV === 'development') {
-    console.log(`Request logs available at http://localhost:${PORT}/api/logs`);
-    console.log(`Log statistics at http://localhost:${PORT}/api/logs/stats`);
-    console.log(`Sessions at http://localhost:${PORT}/api/sessions`);
+// Reseed all events and listings (destructive)
+app.post('/api/admin/reseed', async (req, res) => {
+  try {
+    const db = getDB();
+    const { generateEvents, generateAllListings } = await import('./data/generators.js');
+
+    await db.collection('events').deleteMany({});
+    await db.collection('listings').deleteMany({});
+
+    const events = generateEvents();
+    const listings = generateAllListings();
+
+    await db.collection('events').insertMany(events);
+    await db.collection('listings').insertMany(listings);
+
+    res.json({ events: events.length, listings: listings.length });
+  } catch (error) {
+    console.error('Error reseeding:', error);
+    res.status(500).json({ error: 'Failed to reseed' });
   }
-  console.log(`Health check: http://localhost:${PORT}/health`);
 });
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    await getDB().command({ ping: 1 });
+    res.status(200).json({
+      status: 'ok',
+      db: 'connected',
+      timestamp: new Date().toISOString(),
+      environment: NODE_ENV,
+      uptime: process.uptime()
+    });
+  } catch (e) {
+    res.status(503).json({
+      status: 'degraded',
+      db: 'disconnected',
+      timestamp: new Date().toISOString(),
+      environment: NODE_ENV,
+      uptime: process.uptime()
+    });
+  }
+});
+
+// Start server with DB connection
+async function startServer() {
+  try {
+    await connectDB();
+
+    // Initialize experiments module
+    initExperiments({
+      sessions,
+      requestLogs,
+      loadConfig,
+      getGlobalListingOverrides,
+      logsDir: LOGS_DIR,
+      configDir: join(__dirname, 'config')
+    });
+
+    // Initialize listing overrides module
+    initListingOverrides();
+
+    app.listen(PORT, () => {
+      console.log(`Backend server running on port ${PORT}`);
+      console.log(`Environment: ${NODE_ENV}`);
+      if (NODE_ENV === 'development') {
+        console.log(`Request logs available at http://localhost:${PORT}/api/logs`);
+        console.log(`Log statistics at http://localhost:${PORT}/api/logs/stats`);
+        console.log(`Sessions at http://localhost:${PORT}/api/sessions`);
+      }
+      console.log(`Health check: http://localhost:${PORT}/health`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

@@ -1,6 +1,5 @@
 import { Router } from 'express';
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { getDB } from './db.js';
 
 const router = Router();
 
@@ -8,59 +7,41 @@ const router = Router();
 let sessions = null;
 let requestLogs = null;
 let loadConfig = null;
-let migrateConfig = null;
-let migrateOverrides = null;
 let getGlobalListingOverrides = null;
-let logsDir = null;
-let configDir = null;
-
-// In-memory store
-let experiments = new Map();
-let experimentsFile = null;
 
 function generateExperimentId() {
   return `exp_${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// ========== Persistence ==========
+// ========== DB Helpers ==========
 
-function loadExperiments() {
-  if (existsSync(experimentsFile)) {
-    try {
-      const data = JSON.parse(readFileSync(experimentsFile, 'utf8'));
-      for (const exp of data) {
-        // Migrate old-schema baseConfig if needed
-        if (exp.baseConfig && exp.baseConfig.ui) {
-          exp.baseConfig = migrateConfig(exp.baseConfig);
-        }
-        for (const variant of (exp.variants || [])) {
-          if (variant.overrides && (variant.overrides.ui || variant.overrides.api?.includeFees !== undefined)) {
-            variant.overrides = migrateOverrides(variant.overrides);
-          }
-        }
-        experiments.set(exp.id, exp);
-      }
-    } catch (error) {
-      console.error('Error loading experiments:', error);
-    }
-  }
+async function getExperiment(id) {
+  const db = getDB();
+  return db.collection('experiments').findOne({ id });
 }
 
-let persistTimer = null;
-function persistExperiments() {
-  if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
-    try {
-      writeFileSync(experimentsFile, JSON.stringify([...experiments.values()], null, 2));
-    } catch (error) {
-      console.error('Error persisting experiments:', error);
-    }
-  }, 2000);
+async function getAllExperiments() {
+  const db = getDB();
+  return db.collection('experiments').find().toArray();
+}
+
+async function saveExperiment(exp) {
+  const db = getDB();
+  await db.collection('experiments').updateOne(
+    { id: exp.id },
+    { $set: exp },
+    { upsert: true }
+  );
+}
+
+async function deleteExperiment(id) {
+  const db = getDB();
+  await db.collection('experiments').deleteOne({ id });
 }
 
 // ========== Assignment Logic ==========
 
-function assignVariant(sessionId, experiment) {
+async function assignVariant(sessionId, experiment) {
   // Sticky: check existing assignment
   if (experiment.assignments[sessionId]) {
     return experiment.assignments[sessionId];
@@ -88,37 +69,38 @@ function assignVariant(sessionId, experiment) {
 
   // Persist assignment
   experiment.assignments[sessionId] = variantId;
-  persistExperiments();
+  await saveExperiment(experiment);
   return variantId;
 }
 
 // ========== Config Resolution ==========
 
-export function resolveExperimentConfig(sessionId) {
-  const globalOverrides = getGlobalListingOverrides ? getGlobalListingOverrides() : {};
+export async function resolveExperimentConfig(sessionId) {
+  const globalOverrides = getGlobalListingOverrides ? await getGlobalListingOverrides() : {};
 
   // Find the running experiment (only one allowed)
-  const activeExperiment = [...experiments.values()].find(e => e.status === 'running');
+  const allExperiments = await getAllExperiments();
+  const activeExperiment = allExperiments.find(e => e.status === 'running');
 
   if (!activeExperiment) {
-    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
+    return { config: await loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
 
   // Check targeting rules
   const session = sessions.get(sessionId);
   if (activeExperiment.targeting?.agentOnly && session && !session.isAgent) {
-    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
+    return { config: await loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
   if (activeExperiment.targeting?.regularOnly && session && session.isAgent) {
-    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
+    return { config: await loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
 
   // Assign or retrieve variant
-  const variantId = assignVariant(sessionId, activeExperiment);
+  const variantId = await assignVariant(sessionId, activeExperiment);
   const variant = activeExperiment.variants.find(v => v.id === variantId);
 
   if (!variant || !activeExperiment.baseConfig) {
-    return { config: loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
+    return { config: await loadConfig(), experimentId: null, variantId: null, listingOverrides: globalOverrides };
   }
 
   // Merge base config + variant overrides (per-section shallow merge)
@@ -143,34 +125,29 @@ export function resolveExperimentConfig(sessionId) {
   return { config, experimentId: activeExperiment.id, variantId, listingOverrides: mergedListingOverrides };
 }
 
-export function getActiveExperiment() {
-  return [...experiments.values()].find(e => e.status === 'running') || null;
+export async function getActiveExperiment() {
+  const allExperiments = await getAllExperiments();
+  return allExperiments.find(e => e.status === 'running') || null;
 }
 
 // ========== Scenario Loader Helper ==========
 
-function loadScenarioConfig(scenarioName) {
-  const scenariosDir = join(configDir, 'scenarios');
+async function loadScenarioConfig(scenarioName) {
   try {
-    const files = readdirSync(scenariosDir).filter(f => f.endsWith('.json'));
-    for (const file of files) {
-      const content = readFileSync(join(scenariosDir, file), 'utf8');
-      const scenario = JSON.parse(content);
-      if (scenario.name === scenarioName && scenario.config) {
-        return scenario.config;
-      }
-    }
+    const db = getDB();
+    const scenario = await db.collection('scenarios').findOne({ name: scenarioName });
+    return scenario?.config || null;
   } catch (error) {
     console.error('Error loading scenario for experiment:', error);
+    return null;
   }
-  return null;
 }
 
 // ========== API Routes ==========
 
 // List experiments
-router.get('/api/experiments', (req, res) => {
-  let result = [...experiments.values()];
+router.get('/api/experiments', async (req, res) => {
+  let result = await getAllExperiments();
 
   if (req.query.status) {
     result = result.filter(e => e.status === req.query.status);
@@ -182,6 +159,7 @@ router.get('/api/experiments', (req, res) => {
   // Don't send full assignments in list view (can be large)
   const summary = result.map(exp => ({
     ...exp,
+    _id: undefined,
     assignmentCount: Object.keys(exp.assignments).length,
     assignments: undefined
   }));
@@ -190,19 +168,20 @@ router.get('/api/experiments', (req, res) => {
 });
 
 // Get single experiment
-router.get('/api/experiments/:id', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.get('/api/experiments/:id', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
   res.json({
     ...exp,
+    _id: undefined,
     assignmentCount: Object.keys(exp.assignments).length
   });
 });
 
 // Create experiment
-router.post('/api/experiments', (req, res) => {
+router.post('/api/experiments', async (req, res) => {
   const { name, hypothesis, baseConfigSource, variants, targeting } = req.body;
 
   if (!name || !hypothesis) {
@@ -239,14 +218,13 @@ router.post('/api/experiments', (req, res) => {
     completedAt: null
   };
 
-  experiments.set(experiment.id, experiment);
-  persistExperiments();
+  await saveExperiment(experiment);
   res.status(201).json(experiment);
 });
 
 // Update experiment (draft/paused only)
-router.put('/api/experiments/:id', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.put('/api/experiments/:id', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
@@ -276,13 +254,13 @@ router.put('/api/experiments/:id', (req, res) => {
     }));
   }
 
-  persistExperiments();
+  await saveExperiment(exp);
   res.json(exp);
 });
 
 // Start experiment
-router.post('/api/experiments/:id/start', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.post('/api/experiments/:id/start', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
@@ -291,7 +269,8 @@ router.post('/api/experiments/:id/start', (req, res) => {
   }
 
   // Check no other experiment is running
-  const running = [...experiments.values()].find(e => e.status === 'running' && e.id !== exp.id);
+  const allExps = await getAllExperiments();
+  const running = allExps.find(e => e.status === 'running' && e.id !== exp.id);
   if (running) {
     return res.status(400).json({ error: `Experiment "${running.name}" is already running. Pause or complete it first.` });
   }
@@ -304,40 +283,35 @@ router.post('/api/experiments/:id/start', (req, res) => {
 
   // Snapshot base config
   if (exp.baseConfigSource === 'current') {
-    exp.baseConfig = loadConfig();
+    exp.baseConfig = await loadConfig();
   } else if (exp.baseConfigSource.startsWith('scenario:')) {
     const scenarioName = exp.baseConfigSource.replace('scenario:', '');
-    const scenarioConfig = loadScenarioConfig(scenarioName);
+    const scenarioConfig = await loadScenarioConfig(scenarioName);
     if (!scenarioConfig) {
       return res.status(400).json({ error: `Scenario "${scenarioName}" not found` });
     }
-    // Merge scenario with defaults (same pattern as loadConfig)
-    const DEFAULT_CONFIG = loadConfig(); // get defaults as base
-    // Migrate scenario config if it uses old schema
-    const sc = (scenarioConfig.ui || (!scenarioConfig.pricing && !scenarioConfig.scores))
-      ? migrateConfig(scenarioConfig)
-      : scenarioConfig;
+    const baseConfig = await loadConfig();
     exp.baseConfig = {
-      pricing:  { ...DEFAULT_CONFIG.pricing,  ...(sc.pricing || {}) },
-      scores:   { ...DEFAULT_CONFIG.scores,   ...(sc.scores || {}) },
-      demand:   { ...DEFAULT_CONFIG.demand,   ...(sc.demand || {}) },
-      seller:   { ...DEFAULT_CONFIG.seller,   ...(sc.seller || {}) },
-      content:  { ...DEFAULT_CONFIG.content,  ...(sc.content || {}) },
-      api:      { ...DEFAULT_CONFIG.api,      ...(sc.api || {}) },
-      behavior: { ...DEFAULT_CONFIG.behavior, ...(sc.behavior || {}) },
+      pricing:  { ...baseConfig.pricing,  ...(scenarioConfig.pricing || {}) },
+      scores:   { ...baseConfig.scores,   ...(scenarioConfig.scores || {}) },
+      demand:   { ...baseConfig.demand,   ...(scenarioConfig.demand || {}) },
+      seller:   { ...baseConfig.seller,   ...(scenarioConfig.seller || {}) },
+      content:  { ...baseConfig.content,  ...(scenarioConfig.content || {}) },
+      api:      { ...baseConfig.api,      ...(scenarioConfig.api || {}) },
+      behavior: { ...baseConfig.behavior, ...(scenarioConfig.behavior || {}) },
     };
   }
 
   exp.status = 'running';
   exp.startedAt = exp.startedAt || new Date().toISOString();
 
-  persistExperiments();
+  await saveExperiment(exp);
   res.json(exp);
 });
 
 // Pause experiment
-router.post('/api/experiments/:id/pause', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.post('/api/experiments/:id/pause', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
@@ -346,13 +320,13 @@ router.post('/api/experiments/:id/pause', (req, res) => {
   }
 
   exp.status = 'paused';
-  persistExperiments();
+  await saveExperiment(exp);
   res.json(exp);
 });
 
 // Complete experiment
-router.post('/api/experiments/:id/complete', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.post('/api/experiments/:id/complete', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
@@ -362,13 +336,13 @@ router.post('/api/experiments/:id/complete', (req, res) => {
 
   exp.status = 'completed';
   exp.completedAt = new Date().toISOString();
-  persistExperiments();
+  await saveExperiment(exp);
   res.json(exp);
 });
 
 // Delete experiment (draft/completed only)
-router.delete('/api/experiments/:id', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.delete('/api/experiments/:id', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
@@ -376,14 +350,13 @@ router.delete('/api/experiments/:id', (req, res) => {
     return res.status(400).json({ error: 'Can only delete draft or completed experiments' });
   }
 
-  experiments.delete(exp.id);
-  persistExperiments();
+  await deleteExperiment(exp.id);
   res.json({ success: true });
 });
 
 // Results endpoint
-router.get('/api/experiments/:id/results', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.get('/api/experiments/:id/results', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
@@ -488,8 +461,8 @@ router.get('/api/experiments/:id/results', (req, res) => {
 });
 
 // Export experiment data
-router.get('/api/experiments/:id/export', (req, res) => {
-  const exp = experiments.get(req.params.id);
+router.get('/api/experiments/:id/export', async (req, res) => {
+  const exp = await getExperiment(req.params.id);
   if (!exp) {
     return res.status(404).json({ error: 'Experiment not found' });
   }
@@ -508,17 +481,11 @@ router.get('/api/experiments/:id/export', (req, res) => {
 
 // ========== Init ==========
 
-export function initExperiments({ sessions: s, requestLogs: r, loadConfig: lc, migrateConfig: mc, migrateOverrides: mo, getGlobalListingOverrides: glo, logsDir: ld, configDir: cd }) {
+export function initExperiments({ sessions: s, requestLogs: r, loadConfig: lc, getGlobalListingOverrides: glo, logsDir: ld, configDir: cd }) {
   sessions = s;
   requestLogs = r;
   loadConfig = lc;
-  migrateConfig = mc;
-  migrateOverrides = mo;
   getGlobalListingOverrides = glo || null;
-  logsDir = ld;
-  configDir = cd;
-  experimentsFile = join(ld, 'experiments.json');
-  loadExperiments();
 }
 
 export default router;
